@@ -42,6 +42,7 @@ constexpr char const* DataHeader = "WOE";
     enum WOECreatures
     {
         NPC_PEROTHARN = 55085,
+        NPC_QUEEN_AZSHARA = 54853, // Azimov
 
         // Azimov : quête « Cartographier les voies temporelles »
         NPC_LEGION_DEMON                        = 54500,

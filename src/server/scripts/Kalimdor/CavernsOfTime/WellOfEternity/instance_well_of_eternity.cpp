@@ -26,12 +26,16 @@
 #include "Player.h"
 #include "ScriptedCreature.h"
 #include "TemporarySummon.h"
+#include "SpellScript.h"
+#include "SpellInfo.h"
+#include <vector>
 
 namespace WellOfEternity
 {
 ObjectData const creatureData[] =
 {
     { NPC_PEROTHARN,    BOSS_PEROTHARN  },
+    { NPC_QUEEN_AZSHARA, BOSS_QUEEN_AZSHARA }, // Azimov
     { 0,                0               } // END
 };
 
@@ -396,6 +400,385 @@ private:
     bool _found;
 };
 }
+
+// ============================================================================
+// Azimov : Reine Azshara (rencontre des Mages enchantés)
+// ============================================================================
+namespace QueenAzshara
+{
+enum Spells
+{
+    SPELL_TOTAL_OBEDIENCE   = 103241,
+
+    // Mage de feu
+    SPELL_FIREBALL          = 102265,
+    SPELL_FIREBOMB          = 102263,
+    // Mage de givre
+    SPELL_ICE_FLING         = 102478,
+    SPELL_COLDFLAME         = 102465,
+    SPELL_BLADES_OF_ICE     = 102476,
+    // Mage des Arcanes
+    SPELL_ARCANE_SHOCK      = 102463,
+    SPELL_ARCANE_BOMB       = 102455
+};
+
+enum Texts
+{
+    SAY_AGGRO       = 0,
+    SAY_WAVE_1      = 1,
+    SAY_WAVE_2      = 2,
+    SAY_WAVE_3      = 3,
+    SAY_OBEDIENCE   = 4,
+    SAY_SLAY        = 5,
+    SAY_END         = 6
+};
+
+enum Events
+{
+    EVENT_CHECK_MAGI = 1,
+    EVENT_NEXT_WAVE,
+    EVENT_TOTAL_OBEDIENCE,
+    EVENT_DESPAWN,
+
+    // Mages
+    EVENT_SPELL_1,
+    EVENT_SPELL_2,
+    EVENT_SPELL_3
+};
+
+enum Misc
+{
+    NPC_MAGUS_FIRE      = 54882,
+    NPC_MAGUS_ARCANE    = 54883,
+    NPC_MAGUS_FROST     = 54884,
+    ACTION_ACTIVATE     = 1
+};
+
+struct boss_woe_queen_azshara : public BossAI
+{
+    boss_woe_queen_azshara(Creature* creature) : BossAI(creature, BOSS_QUEEN_AZSHARA), _started(false), _finished(false), _wave(0) { }
+
+    void JustAppeared() override
+    {
+        if (instance->GetBossState(BOSS_QUEEN_AZSHARA) == DONE)
+        {
+            me->DespawnOrUnsummon();
+            return;
+        }
+
+        // Azshara ne se bat pas : elle est ciblable (pour interrompre) mais ne subit aucun dégât
+        me->SetReactState(REACT_PASSIVE);
+        me->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NOT_SELECTABLE);
+        me->SetImmuneToPC(false);
+        SetCombatMovement(false);
+    }
+
+    void MoveInLineOfSight(Unit* who) override
+    {
+        if (!_started && !_finished && who->IsPlayer() && !who->ToPlayer()->IsGameMaster() && me->IsWithinDistInMap(who, 35.0f))
+            StartEncounter(who);
+    }
+
+    void AttackStart(Unit* who) override
+    {
+        if (!_started && !_finished && who && who->IsPlayer())
+            StartEncounter(who);
+    }
+
+    void DamageTaken(Unit* /*attacker*/, uint32& damage) override
+    {
+        damage = 0;
+    }
+
+    void KilledUnit(Unit* victim) override
+    {
+        if (victim->IsPlayer())
+            Talk(SAY_SLAY, victim);
+    }
+
+    void EnterEvadeMode(EvadeReason why) override
+    {
+        if (_finished)
+            return;
+
+        instance->SendEncounterUnit(ENCOUNTER_FRAME_DISENGAGE, me);
+        // Les mages reprennent leur place, les morts reviennent
+        for (ObjectGuid const& guid : _magi)
+            if (Creature* magus = ObjectAccessor::GetCreature(*me, guid))
+            {
+                if (!magus->IsAlive())
+                    magus->Respawn(true);
+                else if (magus->IsAIEnabled())
+                    magus->AI()->EnterEvadeMode();
+            }
+        _magi.clear();
+        _started = false;
+        _wave = 0;
+        _EnterEvadeMode(why);
+        me->GetMotionMaster()->MoveTargetedHome();
+        instance->SetBossState(BOSS_QUEEN_AZSHARA, FAIL);
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!_started)
+            return;
+
+        if (!_finished && !UpdateVictim())
+            return;
+
+        events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                case EVENT_CHECK_MAGI:
+                    CheckMagi();
+                    if (!_finished)
+                        events.Repeat(1s);
+                    break;
+                case EVENT_NEXT_WAVE:
+                    ActivateNextWave();
+                    break;
+                case EVENT_TOTAL_OBEDIENCE:
+                    Talk(SAY_OBEDIENCE);
+                    DoCastAOE(SPELL_TOTAL_OBEDIENCE);
+                    events.Repeat(40s);
+                    break;
+                case EVENT_DESPAWN:
+                    me->DespawnOrUnsummon();
+                    break;
+                default:
+                    break;
+            }
+
+            if (me->HasUnitState(UNIT_STATE_CASTING))
+                return;
+        }
+    }
+
+private:
+    void StartEncounter(Unit* who)
+    {
+        _started = true;
+        Talk(SAY_AGGRO, who);
+        instance->SetBossState(BOSS_QUEEN_AZSHARA, IN_PROGRESS);
+        instance->SendEncounterUnit(ENCOUNTER_FRAME_ENGAGE, me, 1);
+        DoZoneInCombat();
+
+        _magi.clear();
+        for (uint32 entry : { NPC_MAGUS_FIRE, NPC_MAGUS_FROST, NPC_MAGUS_ARCANE })
+        {
+            std::list<Creature*> list;
+            me->GetCreatureListWithEntryInGrid(list, entry, 120.0f);
+            for (Creature* magus : list)
+                if (magus->IsAlive())
+                    _magi.push_back(magus->GetGUID());
+        }
+
+        _wave = 0;
+        ActivateNextWave();
+        events.ScheduleEvent(EVENT_CHECK_MAGI, 1s);
+        events.ScheduleEvent(EVENT_TOTAL_OBEDIENCE, 25s);
+    }
+
+    // Deux mages entrent en jeu à chaque vague
+    void ActivateNextWave()
+    {
+        events.CancelEvent(EVENT_NEXT_WAVE);
+        uint8 activated = 0;
+        for (ObjectGuid const& guid : _magi)
+        {
+            if (activated >= 2)
+                break;
+            Creature* magus = ObjectAccessor::GetCreature(*me, guid);
+            if (!magus || !magus->IsAlive() || !magus->IsImmuneToPC())
+                continue;
+            if (magus->IsAIEnabled())
+                magus->AI()->DoAction(ACTION_ACTIVATE);
+            ++activated;
+        }
+
+        if (!activated)
+            return;
+
+        Talk(SAY_WAVE_1 + std::min<uint8>(_wave, 2));
+        ++_wave;
+        events.ScheduleEvent(EVENT_NEXT_WAVE, 60s); // les suivants arrivent de toute façon au bout d'une minute
+    }
+
+    void CheckMagi()
+    {
+        uint8 alive = 0;
+        uint8 activeAlive = 0;
+        for (ObjectGuid const& guid : _magi)
+            if (Creature* magus = ObjectAccessor::GetCreature(*me, guid))
+                if (magus->IsAlive())
+                {
+                    ++alive;
+                    if (!magus->IsImmuneToPC())
+                        ++activeAlive;
+                }
+
+        if (!alive)
+        {
+            Finish();
+            return;
+        }
+
+        if (!activeAlive)
+            ActivateNextWave();
+    }
+
+    // Tous les mages sont tombés : Azshara s'en va
+    void Finish()
+    {
+        _finished = true;
+        events.Reset();
+        me->InterruptNonMeleeSpells(false);
+        Talk(SAY_END);
+        instance->SendEncounterUnit(ENCOUNTER_FRAME_DISENGAGE, me);
+        instance->SetBossState(BOSS_QUEEN_AZSHARA, DONE);
+        me->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NOT_SELECTABLE);
+        me->CombatStop(true);
+        events.ScheduleEvent(EVENT_DESPAWN, 8s);
+    }
+
+    bool _started;
+    bool _finished;
+    uint8 _wave;
+    std::vector<ObjectGuid> _magi;
+};
+
+// 54882 / 54883 / 54884 - Mage enchanté (feu / Arcanes / givre)
+struct npc_woe_enchanted_magus : public ScriptedAI
+{
+    npc_woe_enchanted_magus(Creature* creature) : ScriptedAI(creature) { }
+
+    void JustAppeared() override
+    {
+        SetInactive();
+    }
+
+    void EnterEvadeMode(EvadeReason why) override
+    {
+        ScriptedAI::EnterEvadeMode(why);
+        SetInactive();
+    }
+
+    void DoAction(int32 action) override
+    {
+        if (action != ACTION_ACTIVATE)
+            return;
+
+        me->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NOT_SELECTABLE);
+        me->SetImmuneToPC(false);
+        me->SetReactState(REACT_AGGRESSIVE);
+        DoZoneInCombat();
+        if (Unit* target = SelectTarget(SELECT_TARGET_MINDISTANCE, 0, 100.0f, true))
+            AttackStart(target);
+    }
+
+    void JustEngagedWith(Unit* /*who*/) override
+    {
+        _events.Reset();
+        _events.ScheduleEvent(EVENT_SPELL_1, 1s);
+        _events.ScheduleEvent(EVENT_SPELL_2, 8s);
+        _events.ScheduleEvent(EVENT_SPELL_3, 14s);
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+
+        _events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = _events.ExecuteEvent())
+        {
+            switch (me->GetEntry())
+            {
+                case NPC_MAGUS_FIRE:
+                    if (eventId == EVENT_SPELL_1) { DoCastVictim(SPELL_FIREBALL); _events.Repeat(3s); }
+                    else if (eventId == EVENT_SPELL_2) { CastRandom(SPELL_FIREBOMB); _events.Repeat(12s); }
+                    break;
+                case NPC_MAGUS_FROST:
+                    if (eventId == EVENT_SPELL_1) { CastRandom(SPELL_ICE_FLING); _events.Repeat(4s); }
+                    else if (eventId == EVENT_SPELL_2) { DoCastVictim(SPELL_COLDFLAME); _events.Repeat(15s); }
+                    else if (eventId == EVENT_SPELL_3) { CastRandom(SPELL_BLADES_OF_ICE); _events.Repeat(20s); }
+                    break;
+                case NPC_MAGUS_ARCANE:
+                    if (eventId == EVENT_SPELL_1) { CastRandom(SPELL_ARCANE_BOMB); _events.Repeat(10s); }
+                    else if (eventId == EVENT_SPELL_2) { DoCastSelf(SPELL_ARCANE_SHOCK); _events.Repeat(25s); }
+                    break;
+                default:
+                    break;
+            }
+
+            if (me->HasUnitState(UNIT_STATE_CASTING))
+                return;
+        }
+
+        DoMeleeAttackIfReady();
+    }
+
+private:
+    void SetInactive()
+    {
+        _events.Reset();
+        me->SetReactState(REACT_PASSIVE);
+        me->SetImmuneToPC(true);
+    }
+
+    void CastRandom(uint32 spellId)
+    {
+        if (Unit* target = SelectTarget(SELECT_TARGET_RANDOM, 0, 60.0f, true))
+            DoCast(target, spellId);
+        else
+            DoCastVictim(spellId);
+    }
+
+    EventMap _events;
+};
+
+// 103241 - Obéissance totale : si elle n'est pas interrompue, chaque joueur perd 40 % de ses points de vie
+// (le contrôle mental d'origine n'est pas appliqué, il bloquerait le groupe)
+class spell_woe_total_obedience : public SpellScript
+{
+    void PreventAura(SpellEffIndex effIndex)
+    {
+        PreventHitDefaultEffect(effIndex);
+    }
+
+    void HandleAfterHit()
+    {
+        Unit* target = GetHitUnit();
+        Unit* caster = GetCaster() ? GetCaster()->ToUnit() : nullptr;
+        if (!target || !caster || !target->IsPlayer())
+            return;
+
+        target->RemoveAurasDueToSpell(SPELL_TOTAL_OBEDIENCE);
+        uint32 damage = target->CountPctFromMaxHealth(40);
+        caster->SendSpellNonMeleeDamageLog(target, SPELL_TOTAL_OBEDIENCE, damage, SPELL_SCHOOL_MASK_ARCANE, 0, 0, false, 0);
+        Unit::DealDamage(caster, target, damage, 0, SPELL_DIRECT_DAMAGE, SPELL_SCHOOL_MASK_ARCANE, GetSpellInfo(), false);
+    }
+
+    void Register() override
+    {
+        OnEffectHitTarget.Register(&spell_woe_total_obedience::PreventAura, EFFECT_0, SPELL_EFFECT_APPLY_AURA);
+        OnEffectHitTarget.Register(&spell_woe_total_obedience::PreventAura, EFFECT_1, SPELL_EFFECT_APPLY_AURA);
+        OnEffectHitTarget.Register(&spell_woe_total_obedience::PreventAura, EFFECT_2, SPELL_EFFECT_APPLY_AURA);
+        AfterHit.Register(&spell_woe_total_obedience::HandleAfterHit);
+    }
+};
+}
 }
 
 void AddSC_instance_well_of_eternity()
@@ -407,4 +790,10 @@ void AddSC_instance_well_of_eternity()
     using namespace WellOfEternity::Perotharn;
     RegisterWellOfEternityCreatureAI(boss_perotharn);
     RegisterWellOfEternityCreatureAI(npc_perotharn_eye);
+
+    // Azimov : Reine Azshara
+    using namespace WellOfEternity::QueenAzshara;
+    RegisterWellOfEternityCreatureAI(boss_woe_queen_azshara);
+    RegisterWellOfEternityCreatureAI(npc_woe_enchanted_magus);
+    RegisterSpellScript(spell_woe_total_obedience);
 }
