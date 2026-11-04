@@ -36,6 +36,8 @@ ObjectData const creatureData[] =
 {
     { NPC_PEROTHARN,    BOSS_PEROTHARN  },
     { NPC_QUEEN_AZSHARA, BOSS_QUEEN_AZSHARA }, // Azimov
+    { NPC_MANNOROTH,        DATA_MANNOROTH      }, // Azimov
+    { NPC_CAPTAIN_VAROTHEN, DATA_VAROTHEN       }, // Azimov
     { 0,                0               } // END
 };
 
@@ -779,6 +781,289 @@ class spell_woe_total_obedience : public SpellScript
     }
 };
 }
+
+// ============================================================================
+// Azimov : Mannoroth et Varo'then
+// ============================================================================
+namespace Mannoroth
+{
+enum Spells
+{
+    // Mannoroth
+    SPELL_FEL_FIRESTORM     = 103888,
+    SPELL_FELBLADE          = 103966,
+    SPELL_EMBEDDED_BLADE    = 104820,
+    SPELL_FEL_FIRE_NOVA     = 105093,
+    // Varo'then
+    SPELL_BLADE_DANCE       = 104995,
+    // Gangreflammes au sol
+    SPELL_FEL_FLAMES_AURA   = 103892
+};
+
+enum Texts
+{
+    // Mannoroth
+    SAY_M_AGGRO     = 0,
+    SAY_M_PORTAL    = 1,
+    SAY_M_BLADE     = 2,
+    SAY_M_SLAY      = 3,
+    SAY_M_DEATH     = 4,
+    // Varo'then
+    SAY_V_AGGRO     = 0,
+    SAY_V_SLAY      = 1,
+    SAY_V_DEATH     = 2
+};
+
+enum Events
+{
+    EVENT_FEL_FIRESTORM = 1,
+    EVENT_FELBLADE,
+    EVENT_FEL_FIRE_NOVA,
+    EVENT_SUMMON_DEMONS,
+    EVENT_BLADE_DANCE
+};
+
+enum Misc
+{
+    NPC_VORACIOUS_FELHOUND  = 56073,
+    NPC_DOOMGUARD_DEVASTATOR = 55739,
+    NPC_ABYSSAL_DOOMBRINGER = 55510,
+    ACTION_VAROTHEN_DIED    = 1
+};
+
+struct boss_woe_mannoroth : public BossAI
+{
+    boss_woe_mannoroth(Creature* creature) : BossAI(creature, BOSS_MANNOROTH_AND_VAROTHEN), _portalPhase(0), _bladeEmbedded(false) { }
+
+    void JustAppeared() override
+    {
+        me->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NOT_SELECTABLE);
+        me->SetImmuneToPC(false);
+    }
+
+    void JustEngagedWith(Unit* who) override
+    {
+        BossAI::JustEngagedWith(who);
+        Talk(SAY_M_AGGRO, who);
+        instance->SendEncounterUnit(ENCOUNTER_FRAME_ENGAGE, me, 1);
+        _portalPhase = 0;
+        _bladeEmbedded = false;
+
+        if (Creature* varothen = instance->GetCreature(DATA_VAROTHEN))
+            if (varothen->IsAlive() && !varothen->IsEngaged() && varothen->IsAIEnabled())
+                varothen->AI()->AttackStart(who);
+
+        events.ScheduleEvent(EVENT_FELBLADE, 5s);
+        events.ScheduleEvent(EVENT_FEL_FIRE_NOVA, 12s);
+        events.ScheduleEvent(EVENT_FEL_FIRESTORM, 25s);
+    }
+
+    void EnterEvadeMode(EvadeReason why) override
+    {
+        instance->SendEncounterUnit(ENCOUNTER_FRAME_DISENGAGE, me);
+        summons.DespawnAll();
+        if (Creature* varothen = instance->GetCreature(DATA_VAROTHEN))
+        {
+            if (!varothen->IsAlive())
+                varothen->Respawn(true);
+            else if (varothen->IsAIEnabled())
+                varothen->AI()->EnterEvadeMode();
+        }
+        _EnterEvadeMode(why);
+        _DespawnAtEvade();
+    }
+
+    void JustDied(Unit* killer) override
+    {
+        BossAI::JustDied(killer);
+        Talk(SAY_M_DEATH);
+        instance->SendEncounterUnit(ENCOUNTER_FRAME_DISENGAGE, me);
+        if (Creature* varothen = instance->GetCreature(DATA_VAROTHEN))
+            if (varothen->IsAlive())
+                varothen->KillSelf();
+    }
+
+    void KilledUnit(Unit* victim) override
+    {
+        if (victim->IsPlayer())
+            Talk(SAY_M_SLAY, victim);
+    }
+
+    void JustSummoned(Creature* summon) override
+    {
+        summons.Summon(summon);
+        if (summon->GetEntry() != 55502) // Gangreflammes
+            DoZoneInCombat(summon);
+    }
+
+    // Varo'then est mort : sa lame reste plantée dans Mannoroth
+    void DoAction(int32 action) override
+    {
+        if (action != ACTION_VAROTHEN_DIED || _bladeEmbedded || !me->IsAlive())
+            return;
+
+        _bladeEmbedded = true;
+        Talk(SAY_M_BLADE);
+        DoCastSelf(SPELL_EMBEDDED_BLADE, true);
+    }
+
+    // Le Portail du Néant libère des démons à 85, 70, 60 et 50 %
+    void DamageTaken(Unit* /*attacker*/, uint32& damage) override
+    {
+        static uint8 const thresholds[4] = { 85, 70, 60, 50 };
+        if (_portalPhase < 4 && me->HealthBelowPctDamaged(thresholds[_portalPhase], damage))
+        {
+            if (_portalPhase == 0)
+                Talk(SAY_M_PORTAL);
+            SummonDemons(_portalPhase);
+            ++_portalPhase;
+        }
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+
+        events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                case EVENT_FELBLADE:
+                    DoCastSelf(SPELL_FELBLADE);
+                    events.Repeat(30s);
+                    break;
+                case EVENT_FEL_FIRE_NOVA:
+                    DoCastAOE(SPELL_FEL_FIRE_NOVA);
+                    events.Repeat(18s);
+                    break;
+                case EVENT_FEL_FIRESTORM:
+                    DoCastSelf(SPELL_FEL_FIRESTORM);
+                    events.Repeat(40s);
+                    break;
+                default:
+                    break;
+            }
+
+            if (me->HasUnitState(UNIT_STATE_CASTING))
+                return;
+        }
+
+        DoMeleeAttackIfReady();
+    }
+
+private:
+    void SummonDemons(uint8 phase)
+    {
+        uint32 entry = NPC_VORACIOUS_FELHOUND;
+        uint8 count = 3;
+        switch (phase)
+        {
+            case 1: count = 4; break;                                       // 70 % : plus de gangrechiens
+            case 2: entry = NPC_DOOMGUARD_DEVASTATOR; count = 1; break;     // 60 %
+            case 3: entry = NPC_ABYSSAL_DOOMBRINGER; count = 1; break;      // 50 %
+            default: break;
+        }
+
+        for (uint8 i = 0; i < count; ++i)
+        {
+            Position pos = me->GetPosition();
+            float const angle = frand(0.0f, 2.0f * float(M_PI));
+            float const dist = frand(8.0f, 15.0f);
+            pos.m_positionX += std::cos(angle) * dist;
+            pos.m_positionY += std::sin(angle) * dist;
+            me->UpdateGroundPositionZ(pos.m_positionX, pos.m_positionY, pos.m_positionZ);
+            me->SummonCreature(entry, pos, TEMPSUMMON_CORPSE_TIMED_DESPAWN, 10000);
+        }
+    }
+
+    uint8 _portalPhase;
+    bool _bladeEmbedded;
+};
+
+// 55419 - Capitaine Varo'then
+struct npc_woe_captain_varothen : public ScriptedAI
+{
+    npc_woe_captain_varothen(Creature* creature) : ScriptedAI(creature), _instance(creature->GetInstanceScript()) { }
+
+    void JustAppeared() override
+    {
+        me->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NOT_SELECTABLE);
+        me->SetImmuneToPC(false);
+    }
+
+    void JustEngagedWith(Unit* who) override
+    {
+        Talk(SAY_V_AGGRO, who);
+        _events.Reset();
+        _events.ScheduleEvent(EVENT_BLADE_DANCE, 15s);
+
+        // Mannoroth entre en combat en même temps
+        if (_instance)
+            if (Creature* mannoroth = _instance->GetCreature(DATA_MANNOROTH))
+                if (mannoroth->IsAlive() && !mannoroth->IsEngaged() && mannoroth->IsAIEnabled())
+                    mannoroth->AI()->AttackStart(who);
+    }
+
+    void KilledUnit(Unit* victim) override
+    {
+        if (victim->IsPlayer())
+            Talk(SAY_V_SLAY, victim);
+    }
+
+    void JustDied(Unit* /*killer*/) override
+    {
+        Talk(SAY_V_DEATH);
+        if (_instance)
+            if (Creature* mannoroth = _instance->GetCreature(DATA_MANNOROTH))
+                if (mannoroth->IsAIEnabled())
+                    mannoroth->AI()->DoAction(ACTION_VAROTHEN_DIED);
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+
+        _events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = _events.ExecuteEvent())
+        {
+            if (eventId == EVENT_BLADE_DANCE)
+            {
+                DoCastSelf(SPELL_BLADE_DANCE);
+                _events.Repeat(25s);
+            }
+        }
+
+        DoMeleeAttackIfReady();
+    }
+
+private:
+    InstanceScript* _instance;
+    EventMap _events;
+};
+
+// 55502 - Gangreflammes (au sol) : brûlent les joueurs proches puis disparaissent
+struct npc_woe_fel_flames : public NullCreatureAI
+{
+    npc_woe_fel_flames(Creature* creature) : NullCreatureAI(creature) { }
+
+    void JustAppeared() override
+    {
+        DoCastSelf(SPELL_FEL_FLAMES_AURA, true);
+        me->DespawnOrUnsummon(15s);
+    }
+};
+}
 }
 
 void AddSC_instance_well_of_eternity()
@@ -796,4 +1081,10 @@ void AddSC_instance_well_of_eternity()
     RegisterWellOfEternityCreatureAI(boss_woe_queen_azshara);
     RegisterWellOfEternityCreatureAI(npc_woe_enchanted_magus);
     RegisterSpellScript(spell_woe_total_obedience);
+
+    // Azimov : Mannoroth et Varo'then
+    using namespace WellOfEternity::Mannoroth;
+    RegisterWellOfEternityCreatureAI(boss_woe_mannoroth);
+    RegisterWellOfEternityCreatureAI(npc_woe_captain_varothen);
+    RegisterWellOfEternityCreatureAI(npc_woe_fel_flames);
 }
