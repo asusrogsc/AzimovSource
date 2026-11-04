@@ -27,6 +27,8 @@
 #include "ScriptedCreature.h"
 #include "TemporarySummon.h"
 #include "SpellScript.h"
+#include "GameObjectAI.h"
+#include "ScriptedGossip.h"
 #include "SpellInfo.h"
 #include <vector>
 
@@ -1064,6 +1066,62 @@ struct npc_woe_fel_flames : public NullCreatureAI
     }
 };
 }
+
+// ============================================================================
+// Azimov : Appareil de transit temporel du Puits d'éternité
+// ============================================================================
+namespace TimeTransit
+{
+constexpr uint32 DEST_COURTYARD = 1;
+constexpr uint32 DEST_PALACE    = 2;
+constexpr uint32 DEST_WELL      = 3;
+
+Position const CourtyardPos = { 3229.0f, -4995.0f, 194.2f, 3.9f };
+Position const PalacePos    = { 3454.3f, -5084.9f, 213.7f, 4.7f };
+Position const WellPos      = { 3130.0f, -5555.0f, 18.3f, 5.6f };
+
+uint32 const GOSSIP_TEXT_SELECT_DESTINATION = 18848; // « Choisissez votre destination. »
+
+struct go_woe_time_transit_device : public GameObjectAI
+{
+    go_woe_time_transit_device(GameObject* go) : GameObjectAI(go) { }
+
+    bool GossipHello(Player* player) override
+    {
+        InstanceScript* instance = me->GetInstanceScript();
+        if (!instance)
+            return false;
+
+        ClearGossipMenuFor(player);
+        AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Cour des Lumières (entrée)", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + DEST_COURTYARD);
+        if (instance->GetBossState(BOSS_PEROTHARN) == DONE)
+            AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Palais d'Azshara", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + DEST_PALACE);
+        if (instance->GetBossState(BOSS_QUEEN_AZSHARA) == DONE)
+            AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Rive du Puits d'éternité (Mannoroth)", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + DEST_WELL);
+
+        SendGossipMenuFor(player, GOSSIP_TEXT_SELECT_DESTINATION, me->GetGUID());
+        return true;
+    }
+
+    bool GossipSelect(Player* player, uint32 /*menuId*/, uint32 gossipListId) override
+    {
+        uint32 const action = player->PlayerTalkClass->GetGossipOptionAction(gossipListId) - GOSSIP_ACTION_INFO_DEF;
+        CloseGossipMenuFor(player);
+
+        Position const* dest = nullptr;
+        switch (action)
+        {
+            case DEST_COURTYARD: dest = &CourtyardPos; break;
+            case DEST_PALACE:    dest = &PalacePos;    break;
+            case DEST_WELL:      dest = &WellPos;      break;
+            default: return true;
+        }
+
+        player->NearTeleportTo(dest->GetPositionX(), dest->GetPositionY(), dest->GetPositionZ(), dest->GetOrientation());
+        return true;
+    }
+};
+}
 }
 
 void AddSC_instance_well_of_eternity()
@@ -1087,4 +1145,7 @@ void AddSC_instance_well_of_eternity()
     RegisterWellOfEternityCreatureAI(boss_woe_mannoroth);
     RegisterWellOfEternityCreatureAI(npc_woe_captain_varothen);
     RegisterWellOfEternityCreatureAI(npc_woe_fel_flames);
+
+    // Azimov : Appareil de transit temporel
+    RegisterGameObjectAI(WellOfEternity::TimeTransit::go_woe_time_transit_device);
 }
