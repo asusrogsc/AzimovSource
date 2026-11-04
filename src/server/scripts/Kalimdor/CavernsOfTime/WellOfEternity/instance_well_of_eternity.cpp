@@ -794,7 +794,8 @@ enum Spells
     // Mannoroth
     SPELL_FEL_FIRESTORM     = 103888,
     SPELL_FELBLADE          = 103966,
-    SPELL_EMBEDDED_BLADE    = 104820,
+    SPELL_EMBEDDED_BLADE    = 104823, // visuel seul (104820 fait partir l'arc sur les joueurs)
+    SPELL_MAGISTRIKE_ARC    = 104822,
     SPELL_FEL_FIRE_NOVA     = 105093,
     // Varo'then
     SPELL_BLADE_DANCE       = 104995,
@@ -910,8 +911,16 @@ struct boss_woe_mannoroth : public BossAI
     }
 
     // Le Portail du Néant libère des démons à 85, 70, 60 et 50 %
-    void DamageTaken(Unit* /*attacker*/, uint32& damage) override
+    void DamageTaken(Unit* attacker, uint32& damage) override
     {
+        // Lame enchâssée : les attaques des joueurs ont 15 % de chances de déclencher Arc Magifrappe sur Mannoroth
+        if (_bladeEmbedded && attacker && attacker->GetCharmerOrOwnerPlayerOrPlayerItself() && damage && roll_chance_i(15))
+        {
+            uint32 const arc = me->CountPctFromMaxHealth(2);
+            me->SendSpellNonMeleeDamageLog(me, SPELL_MAGISTRIKE_ARC, arc, SPELL_SCHOOL_MASK_ARCANE, 0, 0, false, 0);
+            damage += arc;
+        }
+
         static uint8 const thresholds[4] = { 85, 70, 60, 50 };
         if (_portalPhase < 4 && me->HealthBelowPctDamaged(thresholds[_portalPhase], damage))
         {
