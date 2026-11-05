@@ -41,7 +41,8 @@ enum HOTCreatures
     // Azimov
     NPC_ARCURION                        = 54590,
     NPC_FROZEN_SERVITOR                 = 54555,
-    NPC_FROZEN_SERVITOR_SPAWN_POINT     = 54598
+    NPC_FROZEN_SERVITOR_SPAWN_POINT     = 54598,
+    NPC_ASIRA_DAWNSLAYER                = 54968
 };
 
 enum HOTGameObjectIds

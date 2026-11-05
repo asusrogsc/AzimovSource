@@ -2991,7 +2991,7 @@ void Unit::ProcessPositionDataChanged(PositionFullTerrainStatus const& data)
         UpdateMountCapability();
 }
 
-void Unit::ProcessTerrainStatusUpdate(ZLiquidStatus /*oldLiquidStatus*/, Optional<LiquidData> const& newLiquidData)
+void Unit::ProcessTerrainStatusUpdate(ZLiquidStatus oldLiquidStatus, Optional<LiquidData> const& newLiquidData)
 {
     if (!IsControlledByPlayer())
         return;
@@ -3001,6 +3001,15 @@ void Unit::ProcessTerrainStatusUpdate(ZLiquidStatus /*oldLiquidStatus*/, Optiona
         RemoveAurasWithInterruptFlags(SpellAuraInterruptFlags::UnderWater);
     else
         RemoveAurasWithInterruptFlags(SpellAuraInterruptFlags::AboveWater);
+
+    // Azimov : en revenant dans l'eau, reappliquer les auras de zone (spell_area) retirees a la sortie de l'eau (ex. Pied marin a Vashj'ir)
+    if (IsInWater() && !(oldLiquidStatus & (LIQUID_MAP_IN_WATER | LIQUID_MAP_UNDER_WATER)))
+        if (Player* player = ToPlayer())
+        {
+            player->UpdateZoneDependentAuras(player->GetZoneId());
+            if (player->GetAreaId() != player->GetZoneId())
+                player->UpdateAreaDependentAuras(player->GetAreaId());
+        }
 
     // liquid aura handling
     LiquidTypeEntry const* curLiquid = nullptr;

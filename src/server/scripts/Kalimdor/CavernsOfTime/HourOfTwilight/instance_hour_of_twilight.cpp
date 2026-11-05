@@ -31,6 +31,7 @@ namespace HourOfTwilight
 ObjectData const creatureData[] =
 {
     { NPC_ARCURION, DATA_ARCURION }, // Azimov
+    { NPC_ASIRA_DAWNSLAYER, DATA_ASIRA_DAWNSLAYER }, // Azimov
     { 0, 0  } // END
 };
 
@@ -229,6 +230,172 @@ private:
     bool _torrent;
 };
 }
+
+// ============================================================================
+// Azimov : Asira Aubetueuse
+// ============================================================================
+namespace Asira
+{
+enum Spells
+{
+    SPELL_MARK_OF_SILENCE       = 102726,
+    SPELL_SILENCED              = 103587,
+    SPELL_THROW_KNIFE           = 103597,
+    SPELL_CHOKING_SMOKE_BOMB    = 103558,
+    SPELL_BLADE_BARRIER         = 103419,
+    SPELL_LESSER_BLADE_BARRIER  = 103562
+};
+
+enum Texts
+{
+    SAY_AGGRO   = 0,
+    SAY_SMOKE   = 1,
+    SAY_SLAY    = 2,
+    SAY_DEATH   = 3
+};
+
+enum Events
+{
+    EVENT_MARK_OF_SILENCE = 1,
+    EVENT_CHECK_MARKED,
+    EVENT_SMOKE_BOMB,
+    EVENT_THROW_KNIFE
+};
+
+struct boss_asira_dawnslayer : public BossAI
+{
+    boss_asira_dawnslayer(Creature* creature) : BossAI(creature, DATA_ASIRA_DAWNSLAYER), _barrier(false), _lesserBarrier(false) { }
+
+    void JustAppeared() override
+    {
+        me->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NOT_SELECTABLE);
+        me->SetImmuneToPC(false);
+        if (me->IsMounted())
+            me->Dismount();
+    }
+
+    void JustEngagedWith(Unit* who) override
+    {
+        BossAI::JustEngagedWith(who);
+        Talk(SAY_AGGRO, who);
+        instance->SendEncounterUnit(ENCOUNTER_FRAME_ENGAGE, me, 1);
+        _barrier = false;
+        _lesserBarrier = false;
+        events.ScheduleEvent(EVENT_MARK_OF_SILENCE, 3s);
+        events.ScheduleEvent(EVENT_CHECK_MARKED, 1s);
+        events.ScheduleEvent(EVENT_SMOKE_BOMB, 15s);
+        events.ScheduleEvent(EVENT_THROW_KNIFE, 8s);
+    }
+
+    void EnterEvadeMode(EvadeReason why) override
+    {
+        instance->SendEncounterUnit(ENCOUNTER_FRAME_DISENGAGE, me);
+        me->RemoveAurasDueToSpell(SPELL_BLADE_BARRIER);
+        me->RemoveAurasDueToSpell(SPELL_LESSER_BLADE_BARRIER);
+        instance->DoRemoveAurasDueToSpellOnPlayers(SPELL_MARK_OF_SILENCE);
+        summons.DespawnAll();
+        _EnterEvadeMode(why);
+        _DespawnAtEvade();
+    }
+
+    void JustDied(Unit* killer) override
+    {
+        BossAI::JustDied(killer);
+        Talk(SAY_DEATH);
+        instance->SendEncounterUnit(ENCOUNTER_FRAME_DISENGAGE, me);
+        instance->DoRemoveAurasDueToSpellOnPlayers(SPELL_MARK_OF_SILENCE);
+    }
+
+    void KilledUnit(Unit* victim) override
+    {
+        if (victim->IsPlayer())
+            Talk(SAY_SLAY, victim);
+    }
+
+    void DamageTaken(Unit* /*attacker*/, uint32& damage) override
+    {
+        // 30 % : Barrière de lames ; une fois brisée, Barrière de lames inférieure
+        if (!_barrier && me->HealthBelowPctDamaged(30, damage))
+        {
+            _barrier = true;
+            DoCastSelf(SPELL_BLADE_BARRIER, true);
+        }
+        else if (_barrier && !_lesserBarrier && !me->HasAura(SPELL_BLADE_BARRIER))
+        {
+            _lesserBarrier = true;
+            DoCastSelf(SPELL_LESSER_BLADE_BARRIER, true);
+        }
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+
+        events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                case EVENT_MARK_OF_SILENCE:
+                {
+                    // Marque jusqu'à deux joueurs non marqués
+                    std::list<Unit*> targets;
+                    SelectTargetList(targets, 2, SELECT_TARGET_RANDOM, 0, 0.0f, true, false, -int32(SPELL_MARK_OF_SILENCE));
+                    for (Unit* target : targets)
+                        me->AddAura(SPELL_MARK_OF_SILENCE, target);
+                    events.Repeat(25s);
+                    break;
+                }
+                case EVENT_CHECK_MARKED:
+                {
+                    // Un joueur marqué qui incante reçoit un couteau et est réduit au silence
+                    for (auto const& ref : me->GetMap()->GetPlayers())
+                    {
+                        Player* player = ref.GetSource();
+                        if (!player || !player->IsAlive() || player->IsGameMaster() || !player->HasAura(SPELL_MARK_OF_SILENCE))
+                            continue;
+                        if (player->HasUnitState(UNIT_STATE_CASTING) && me->IsWithinDistInMap(player, 60.0f))
+                        {
+                            player->InterruptNonMeleeSpells(false);
+                            DoCast(player, SPELL_THROW_KNIFE, true);
+                            me->CastSpell(player, SPELL_SILENCED, true);
+                            player->RemoveAurasDueToSpell(SPELL_MARK_OF_SILENCE);
+                        }
+                    }
+                    events.Repeat(500ms);
+                    break;
+                }
+                case EVENT_SMOKE_BOMB:
+                    Talk(SAY_SMOKE);
+                    DoCastSelf(SPELL_CHOKING_SMOKE_BOMB);
+                    events.Repeat(25s);
+                    break;
+                case EVENT_THROW_KNIFE:
+                    if (Unit* target = SelectTarget(SELECT_TARGET_RANDOM, 0, 50.0f, true))
+                        DoCast(target, SPELL_THROW_KNIFE);
+                    events.Repeat(10s, 14s);
+                    break;
+                default:
+                    break;
+            }
+
+            if (me->HasUnitState(UNIT_STATE_CASTING))
+                return;
+        }
+
+        DoMeleeAttackIfReady();
+    }
+
+private:
+    bool _barrier;
+    bool _lesserBarrier;
+};
+}
 }
 
 void AddSC_instance_hour_of_twilight()
@@ -239,4 +406,8 @@ void AddSC_instance_hour_of_twilight()
     // Azimov : Arcurion
     using namespace HourOfTwilight::Arcurion;
     RegisterHourOfTwilightCreatureAI(boss_arcurion);
+
+    // Azimov : Asira Aubetueuse
+    using namespace HourOfTwilight::Asira;
+    RegisterHourOfTwilightCreatureAI(boss_asira_dawnslayer);
 }
