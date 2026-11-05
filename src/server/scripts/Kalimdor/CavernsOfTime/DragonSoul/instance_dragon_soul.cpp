@@ -29,6 +29,7 @@ namespace DragonSoul
 ObjectData const creatureData[] =
 {
     { BOSS_MORCHOK,                         DATA_MORCHOK                            },
+    { BOSS_WARLORD_ZONOZZ,                  DATA_WARLORD_ZONOZZ                     },
     { BOSS_MADNESS_OF_DEATHWING,            DATA_MADNESS_OF_DEATHWING               },
     { NPC_DEATHWING_MADNESS_OF_DEATHWING,   DATA_DEATHWING_MADNESS_OF_DEATHWING     },
     { NPC_THRALL_MADNESS_OF_DEATHWING,      DATA_THRALL_MADNESS_OF_DEATHWING        },

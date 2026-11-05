@@ -58,6 +58,7 @@ enum DSCreatures
 {
     // Bosses
     BOSS_MORCHOK                                = 55265,
+    BOSS_WARLORD_ZONOZZ                         = 55308,
     BOSS_MADNESS_OF_DEATHWING                   = 56173,
     NPC_KOHCROM                                 = 57773,
 
