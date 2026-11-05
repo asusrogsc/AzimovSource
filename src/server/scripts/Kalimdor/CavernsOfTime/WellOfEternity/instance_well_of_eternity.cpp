@@ -797,6 +797,7 @@ enum Spells
     SPELL_EMBEDDED_BLADE    = 104823, // visuel seul (104820 fait partir l'arc sur les joueurs)
     SPELL_MAGISTRIKE_ARC    = 104822,
     SPELL_FEL_FIRE_NOVA     = 105093,
+    SPELL_MANNOROTH_ACHIEVEMENT = 105576, // crédit de fin de donjon (haut fait, recherche de donjon)
     // Varo'then
     SPELL_BLADE_DANCE       = 104995,
     // Gangreflammes au sol
@@ -880,6 +881,10 @@ struct boss_woe_mannoroth : public BossAI
     {
         BossAI::JustDied(killer);
         Talk(SAY_M_DEATH);
+        // Sur retail, la fin scénarisée lance ce sort sur les joueurs : il valide le haut fait et le donjon
+        instance->DoCastSpellOnPlayers(SPELL_MANNOROTH_ACHIEVEMENT);
+        instance->DoUpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_BE_SPELL_TARGET, SPELL_MANNOROTH_ACHIEVEMENT, 0, me);
+        instance->UpdateEncounterStateForSpellCast(SPELL_MANNOROTH_ACHIEVEMENT, me);
         instance->SendEncounterUnit(ENCOUNTER_FRAME_DISENGAGE, me);
         if (Creature* varothen = instance->GetCreature(DATA_VAROTHEN))
             if (varothen->IsAlive())
