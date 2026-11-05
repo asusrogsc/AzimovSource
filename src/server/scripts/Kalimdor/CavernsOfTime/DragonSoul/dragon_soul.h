@@ -48,13 +48,24 @@ enum DSDataTypes
     DATA_ALEXSTRASZA_MADNESS_OF_DEATHWING,
     DATA_NOZDORMU_MADNESS_OF_DEATHWING,
     DATA_KALECGOS_MADNESS_OF_DEATHWING,
-    DATA_TAIL_TENTACLE_MADNESS_OF_DEATHWING
+    DATA_TAIL_TENTACLE_MADNESS_OF_DEATHWING,
+
+    // Siege of Wyrmrest Temple
+    DATA_MORCHOK_TRASH          // SetData(DATA_MORCHOK_TRASH, spawnId) quand un trash meurt
 };
 
 enum DSCreatures
 {
     // Bosses
+    BOSS_MORCHOK                                = 55265,
     BOSS_MADNESS_OF_DEATHWING                   = 56173,
+    NPC_KOHCROM                                 = 57773,
+
+    /*Morchok trash*/
+    NPC_EARTHEN_DESTROYER                       = 57158,
+    NPC_EARTHEN_SOLDIER                         = 57159,
+    NPC_ANCIENT_WATER_LORD                      = 57160,
+    NPC_TWILIGHT_SIEGE_CAPTAIN                  = 57280,
 
     /*Madness of Deathwing*/
     NPC_DEATHWING_MADNESS_OF_DEATHWING          = 57962,
@@ -88,6 +99,15 @@ enum DSGameObjectIds
     GO_ELEMENTIUM_FRAGMENT_25_LFR    = 210220,
     GO_ELEMENTIUM_FRAGMENT_10_HEROIC = 210219,
     GO_ELEMENTIUM_FRAGMENT_25_HEROIC = 210217
+};
+
+enum DSTexts
+{
+    // Morchok : répliques pendant le nettoyage du trash (groupes 20+ pour ne pas
+    // entrer en conflit avec les textes du combat)
+    SAY_MORCHOK_TRASH_PACK_1    = 20,
+    SAY_MORCHOK_TRASH_PACK_2    = 21,
+    SAY_MORCHOK_INTRO           = 22  // "No mortal shall turn me from my task."
 };
 
 enum DSSpells

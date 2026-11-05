@@ -54,6 +54,8 @@ void AddSC_instance_end_time();
 void AddSC_instance_well_of_eternity();      //CoT Well of Eternity
 void AddSC_instance_hour_of_twilight();      //CoT Hour of Twilight
 void AddSC_instance_dragon_soul();           //CoT Dragon Soul
+void AddSC_dragon_soul_trash();
+void AddSC_boss_morchok();
 void AddSC_boss_madness_of_deathwing();
 void AddSC_instance_dire_maul();             //Dire Maul
 void AddSC_instance_ragefire_chasm();        //Ragefire Chasm
@@ -194,6 +196,8 @@ void AddKalimdorScripts()
     AddSC_instance_well_of_eternity();      //CoT Well of Eternity
     AddSC_instance_hour_of_twilight();      //CoT Hour of Twilight
     AddSC_instance_dragon_soul();           //CoT Dragon Soul
+    AddSC_dragon_soul_trash();
+    AddSC_boss_morchok();
     AddSC_boss_madness_of_deathwing();
     AddSC_instance_dire_maul();             //Dire Maul
     AddSC_instance_ragefire_chasm();        //Ragefire Chasm

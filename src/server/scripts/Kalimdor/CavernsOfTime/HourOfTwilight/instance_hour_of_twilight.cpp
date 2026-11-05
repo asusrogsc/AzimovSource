@@ -410,14 +410,12 @@ enum Spells
     SPELL_SMITE                 = 104503,
     SPELL_RIGHTEOUS_SHEAR       = 103151,
     SPELL_PURIFIED              = 103653, // explosion des orbes de Lumière purificatrice
-    SPELL_WAVE_OF_VIRTUE        = 103678,
-    // Transition
-    SPELL_TWILIGHT_EPIPHANY     = 103754,
+    SPELL_WAVE_OF_VIRTUE_HIT    = 103684, // dégâts + projection de la Vague de vertu
     // Phase Crépuscule
     SPELL_TWILIGHT_BLAST        = 104504,
     SPELL_TWILIGHT_SHEAR        = 103363,
     SPELL_TWILIGHT              = 103775, // explosion des orbes de Crépuscule corrupteur
-    SPELL_WAVE_OF_TWILIGHT      = 103780
+    SPELL_WAVE_OF_TWILIGHT_HIT  = 103781  // dégâts + projection de la Vague du Crépuscule
 };
 
 enum Creatures
@@ -440,6 +438,7 @@ enum Events
     EVENT_SHEAR,
     EVENT_ORBS,
     EVENT_WAVE,
+    EVENT_WAVE_TICK,
     EVENT_TWILIGHT_PHASE
 };
 
@@ -469,7 +468,8 @@ struct boss_archbishop_benedictus : public BossAI
     void EnterEvadeMode(EvadeReason why) override
     {
         instance->SendEncounterUnit(ENCOUNTER_FRAME_DISENGAGE, me);
-        me->RemoveAurasDueToSpell(SPELL_TWILIGHT_EPIPHANY);
+        me->SetObjectScale(1.0f);
+        instance->DoRemoveAurasDueToSpellOnPlayers(103755);
         summons.DespawnAll();
         _EnterEvadeMode(why);
         _DespawnAtEvade();
@@ -496,7 +496,9 @@ struct boss_archbishop_benedictus : public BossAI
             events.Reset();
             me->InterruptNonMeleeSpells(false);
             Talk(SAY_EPIPHANY);
-            DoCastSelf(SPELL_TWILIGHT_EPIPHANY);
+            // Pas de sort 103754 : son effet 103755 place les joueurs dans une autre phase (le boss devient invisible)
+            me->SetObjectScale(1.15f);
+            instance->DoRemoveAurasDueToSpellOnPlayers(103755);
             events.ScheduleEvent(EVENT_TWILIGHT_PHASE, 5s);
         }
     }
@@ -539,6 +541,10 @@ struct boss_archbishop_benedictus : public BossAI
                     SendWave();
                     events.Repeat(30s);
                     break;
+                case EVENT_WAVE_TICK:
+                    if (UpdateWave())
+                        events.Repeat(250ms);
+                    break;
                 case EVENT_TWILIGHT_PHASE:
                     _twilight = true;
                     events.ScheduleEvent(EVENT_SMITE, 1s);
@@ -580,10 +586,46 @@ private:
             wave->SetReactState(REACT_PASSIVE);
             wave->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NOT_SELECTABLE | UNIT_FLAG_NON_ATTACKABLE);
             wave->SetSpeedRate(MOVE_RUN, 1.2f);
-            wave->CastSpell(wave, _twilight ? SPELL_WAVE_OF_TWILIGHT : SPELL_WAVE_OF_VIRTUE, true);
             wave->GetMotionMaster()->MovePoint(0, end);
+            _waveGuid = wave->GetGUID();
+            _waveHit.clear();
+            events.ScheduleEvent(EVENT_WAVE_TICK, 250ms);
         }
     }
+
+    // Chaque joueur n'est touché qu'une fois par vague (l'aura périodique d'origine le frappait 3-4 fois)
+    bool UpdateWave()
+    {
+        Creature* wave = ObjectAccessor::GetCreature(*me, _waveGuid);
+        if (!wave || !wave->IsAlive())
+            return false;
+
+        bool hitSomeone = false;
+        for (auto const& ref : me->GetMap()->GetPlayers())
+        {
+            Player* player = ref.GetSource();
+            if (!player || !player->IsAlive() || player->IsGameMaster() || _waveHit.count(player->GetGUID()))
+                continue;
+            if (wave->IsWithinDist2d(player, 5.0f))
+                hitSomeone = true;
+        }
+
+        if (hitSomeone)
+        {
+            for (auto const& ref : me->GetMap()->GetPlayers())
+                if (Player* player = ref.GetSource())
+                    if (wave->IsWithinDist2d(player, 8.0f))
+                        _waveHit.insert(player->GetGUID());
+
+            // Dégâts réduits de moitié (97 500 -> 48 750) pour un groupe réduit
+            wave->CastSpell(wave, _twilight ? SPELL_WAVE_OF_TWILIGHT_HIT : SPELL_WAVE_OF_VIRTUE_HIT, CastSpellExtraArgs(SPELLVALUE_BASE_POINT0, 48750).SetTriggerFlags(TRIGGERED_FULL_MASK));
+        }
+
+        return true;
+    }
+
+    ObjectGuid _waveGuid;
+    GuidSet _waveHit;
 
     bool _twilight;
     bool _transition;
