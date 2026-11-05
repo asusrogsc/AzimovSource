@@ -42,7 +42,8 @@ enum HOTCreatures
     NPC_ARCURION                        = 54590,
     NPC_FROZEN_SERVITOR                 = 54555,
     NPC_FROZEN_SERVITOR_SPAWN_POINT     = 54598,
-    NPC_ASIRA_DAWNSLAYER                = 54968
+    NPC_ASIRA_DAWNSLAYER                = 54968,
+    NPC_ARCHBISHOP_BENEDICTUS           = 54938
 };
 
 enum HOTGameObjectIds

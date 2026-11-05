@@ -24,6 +24,7 @@
 #include "Player.h"
 #include "ScriptedCreature.h"
 #include "TemporarySummon.h"
+#include <cmath>
 #include <vector>
 
 namespace HourOfTwilight
@@ -32,6 +33,7 @@ ObjectData const creatureData[] =
 {
     { NPC_ARCURION, DATA_ARCURION }, // Azimov
     { NPC_ASIRA_DAWNSLAYER, DATA_ASIRA_DAWNSLAYER }, // Azimov
+    { NPC_ARCHBISHOP_BENEDICTUS, DATA_ARCHBISHOP_BENEDICTUS }, // Azimov
     { 0, 0  } // END
 };
 
@@ -396,6 +398,197 @@ private:
     bool _lesserBarrier;
 };
 }
+
+// ============================================================================
+// Azimov : Archevêque Benedictus
+// ============================================================================
+namespace Benedictus
+{
+enum Spells
+{
+    // Phase Lumière
+    SPELL_SMITE                 = 104503,
+    SPELL_RIGHTEOUS_SHEAR       = 103151,
+    SPELL_PURIFIED              = 103653, // explosion des orbes de Lumière purificatrice
+    SPELL_WAVE_OF_VIRTUE        = 103678,
+    // Transition
+    SPELL_TWILIGHT_EPIPHANY     = 103754,
+    // Phase Crépuscule
+    SPELL_TWILIGHT_BLAST        = 104504,
+    SPELL_TWILIGHT_SHEAR        = 103363,
+    SPELL_TWILIGHT              = 103775, // explosion des orbes de Crépuscule corrupteur
+    SPELL_WAVE_OF_TWILIGHT      = 103780
+};
+
+enum Creatures
+{
+    NPC_WAVE_OF_VIRTUE          = 55441,
+    NPC_WAVE_OF_TWILIGHT        = 55469
+};
+
+enum Texts
+{
+    SAY_AGGRO       = 0,
+    SAY_EPIPHANY    = 1,
+    SAY_WAVE        = 2,
+    SAY_DEATH       = 3
+};
+
+enum Events
+{
+    EVENT_SMITE = 1,
+    EVENT_SHEAR,
+    EVENT_ORBS,
+    EVENT_WAVE,
+    EVENT_TWILIGHT_PHASE
+};
+
+struct boss_archbishop_benedictus : public BossAI
+{
+    boss_archbishop_benedictus(Creature* creature) : BossAI(creature, DATA_ARCHBISHOP_BENEDICTUS), _twilight(false), _transition(false) { }
+
+    void JustAppeared() override
+    {
+        me->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NOT_SELECTABLE);
+        me->SetImmuneToPC(false);
+    }
+
+    void JustEngagedWith(Unit* who) override
+    {
+        BossAI::JustEngagedWith(who);
+        Talk(SAY_AGGRO, who);
+        instance->SendEncounterUnit(ENCOUNTER_FRAME_ENGAGE, me, 1);
+        _twilight = false;
+        _transition = false;
+        events.ScheduleEvent(EVENT_SMITE, 2s);
+        events.ScheduleEvent(EVENT_SHEAR, 8s);
+        events.ScheduleEvent(EVENT_ORBS, 14s);
+        events.ScheduleEvent(EVENT_WAVE, 30s);
+    }
+
+    void EnterEvadeMode(EvadeReason why) override
+    {
+        instance->SendEncounterUnit(ENCOUNTER_FRAME_DISENGAGE, me);
+        me->RemoveAurasDueToSpell(SPELL_TWILIGHT_EPIPHANY);
+        summons.DespawnAll();
+        _EnterEvadeMode(why);
+        _DespawnAtEvade();
+    }
+
+    void JustDied(Unit* killer) override
+    {
+        BossAI::JustDied(killer);
+        Talk(SAY_DEATH);
+        instance->SendEncounterUnit(ENCOUNTER_FRAME_DISENGAGE, me);
+    }
+
+    void JustSummoned(Creature* summon) override
+    {
+        summons.Summon(summon);
+    }
+
+    void DamageTaken(Unit* /*attacker*/, uint32& damage) override
+    {
+        // 60 % : Epiphanie du Crépuscule, passage en phase Crépuscule
+        if (!_transition && me->HealthBelowPctDamaged(60, damage))
+        {
+            _transition = true;
+            events.Reset();
+            me->InterruptNonMeleeSpells(false);
+            Talk(SAY_EPIPHANY);
+            DoCastSelf(SPELL_TWILIGHT_EPIPHANY);
+            events.ScheduleEvent(EVENT_TWILIGHT_PHASE, 5s);
+        }
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+
+        events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                case EVENT_SMITE:
+                    DoCastVictim(_twilight ? SPELL_TWILIGHT_BLAST : SPELL_SMITE);
+                    events.Repeat(4s, 6s);
+                    break;
+                case EVENT_SHEAR:
+                    if (Unit* target = SelectTarget(SELECT_TARGET_RANDOM, 0, 60.0f, true))
+                        DoCast(target, _twilight ? SPELL_TWILIGHT_SHEAR : SPELL_RIGHTEOUS_SHEAR);
+                    events.Repeat(15s);
+                    break;
+                case EVENT_ORBS:
+                {
+                    // Orbes de Lumière purificatrice / Crépuscule corrupteur : explosion sur 3 joueurs
+                    std::list<Unit*> targets;
+                    SelectTargetList(targets, 3, SELECT_TARGET_RANDOM, 0, 60.0f, true);
+                    for (Unit* target : targets)
+                        me->CastSpell(target, _twilight ? SPELL_TWILIGHT : SPELL_PURIFIED, true);
+                    events.Repeat(20s);
+                    break;
+                }
+                case EVENT_WAVE:
+                    Talk(SAY_WAVE);
+                    SendWave();
+                    events.Repeat(30s);
+                    break;
+                case EVENT_TWILIGHT_PHASE:
+                    _twilight = true;
+                    events.ScheduleEvent(EVENT_SMITE, 1s);
+                    events.ScheduleEvent(EVENT_SHEAR, 6s);
+                    events.ScheduleEvent(EVENT_ORBS, 12s);
+                    events.ScheduleEvent(EVENT_WAVE, 20s);
+                    break;
+                default:
+                    break;
+            }
+
+            if (me->HasUnitState(UNIT_STATE_CASTING))
+                return;
+        }
+
+        DoMeleeAttackIfReady();
+    }
+
+private:
+    // Vague de vertu / du Crépuscule : une vague part de derrière l'archevêque et traverse la salle
+    void SendWave()
+    {
+        Unit* target = SelectTarget(SELECT_TARGET_RANDOM, 0, 80.0f, true);
+        if (!target)
+            return;
+
+        float const angle = me->GetAngle(target);
+        Position start = me->GetPosition();
+        start.m_positionX -= 15.0f * std::cos(angle);
+        start.m_positionY -= 15.0f * std::sin(angle);
+        Position end = me->GetPosition();
+        end.m_positionX += 70.0f * std::cos(angle);
+        end.m_positionY += 70.0f * std::sin(angle);
+        start.SetOrientation(angle);
+
+        if (Creature* wave = me->SummonCreature(_twilight ? NPC_WAVE_OF_TWILIGHT : NPC_WAVE_OF_VIRTUE, start, TEMPSUMMON_TIMED_DESPAWN, 15000))
+        {
+            wave->SetFaction(me->GetFaction());
+            wave->SetReactState(REACT_PASSIVE);
+            wave->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NOT_SELECTABLE | UNIT_FLAG_NON_ATTACKABLE);
+            wave->SetSpeedRate(MOVE_RUN, 1.2f);
+            wave->CastSpell(wave, _twilight ? SPELL_WAVE_OF_TWILIGHT : SPELL_WAVE_OF_VIRTUE, true);
+            wave->GetMotionMaster()->MovePoint(0, end);
+        }
+    }
+
+    bool _twilight;
+    bool _transition;
+};
+}
 }
 
 void AddSC_instance_hour_of_twilight()
@@ -410,4 +603,8 @@ void AddSC_instance_hour_of_twilight()
     // Azimov : Asira Aubetueuse
     using namespace HourOfTwilight::Asira;
     RegisterHourOfTwilightCreatureAI(boss_asira_dawnslayer);
+
+    // Azimov : Archeveque Benedictus
+    using namespace HourOfTwilight::Benedictus;
+    RegisterHourOfTwilightCreatureAI(boss_archbishop_benedictus);
 }
