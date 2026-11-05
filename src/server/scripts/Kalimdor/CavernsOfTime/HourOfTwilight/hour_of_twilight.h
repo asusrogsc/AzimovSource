@@ -38,10 +38,17 @@ enum HOTDataTypes
 
 enum HOTCreatures
 {
+    // Azimov
+    NPC_ARCURION                        = 54590,
+    NPC_FROZEN_SERVITOR                 = 54555,
+    NPC_FROZEN_SERVITOR_SPAWN_POINT     = 54598
 };
 
 enum HOTGameObjectIds
 {
+    // Azimov
+    GO_ICEWALL_EXIT     = 210048, // s'ouvre à la mort d'Arcurion
+    GO_ICEWALL_ENTRANCE = 210049  // se ferme pendant le combat
 };
 
 template<class AI>
