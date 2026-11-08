@@ -60,6 +60,7 @@ void AddSC_dragon_soul_travel();
 void AddSC_boss_warlord_zonozz();
 void AddSC_boss_yorsahj_the_unsleeping();
 void AddSC_boss_hagara_the_stormbinder();
+void AddSC_boss_ultraxion();
 void AddSC_boss_madness_of_deathwing();
 void AddSC_instance_dire_maul();             //Dire Maul
 void AddSC_instance_ragefire_chasm();        //Ragefire Chasm
@@ -206,6 +207,7 @@ void AddKalimdorScripts()
     AddSC_boss_warlord_zonozz();
     AddSC_boss_yorsahj_the_unsleeping();
     AddSC_boss_hagara_the_stormbinder();
+    AddSC_boss_ultraxion();
     AddSC_boss_madness_of_deathwing();
     AddSC_instance_dire_maul();             //Dire Maul
     AddSC_instance_ragefire_chasm();        //Ragefire Chasm

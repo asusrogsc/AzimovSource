@@ -33,6 +33,12 @@ ObjectData const creatureData[] =
     { BOSS_WARLORD_ZONOZZ,                  DATA_WARLORD_ZONOZZ                     },
     { BOSS_YORSAHJ_THE_UNSLEEPING,          DATA_YORSAHJ_THE_UNSLEEPING             },
     { BOSS_HAGARA_THE_STORMBINDER,          DATA_HAGARA_THE_STORMBINDER             },
+    { BOSS_ULTRAXION,                       DATA_ULTRAXION                          },
+    { NPC_THRALL_SUMMIT,                    DATA_THRALL_SUMMIT                      },
+    { NPC_ALEXSTRASZA_SUMMIT,               DATA_ALEXSTRASZA_SUMMIT                 },
+    { NPC_YSERA_SUMMIT,                     DATA_YSERA_SUMMIT                       },
+    { NPC_KALECGOS_SUMMIT,                  DATA_KALECGOS_SUMMIT                    },
+    { NPC_NOZDORMU_SUMMIT,                  DATA_NOZDORMU_SUMMIT                    },
     { BOSS_MADNESS_OF_DEATHWING,            DATA_MADNESS_OF_DEATHWING               },
     { NPC_DEATHWING_MADNESS_OF_DEATHWING,   DATA_DEATHWING_MADNESS_OF_DEATHWING     },
     { NPC_THRALL_MADNESS_OF_DEATHWING,      DATA_THRALL_MADNESS_OF_DEATHWING        },
@@ -187,6 +193,10 @@ public:
                     _hagaraIntroDone = data == DONE;
                     SaveToDB();
                     break;
+                case DATA_ULTRAXION_TRASH:
+                    _ultraxionTrashDone = data == DONE;
+                    SaveToDB();
+                    break;
                 default:
                     break;
             }
@@ -198,12 +208,15 @@ public:
                 return _morchokTrashCleared ? 1 : 0;
             if (type == DATA_HAGARA_INTRO_EVENT)
                 return _hagaraIntroDone ? DONE : NOT_STARTED;
+            if (type == DATA_ULTRAXION_TRASH)
+                return _ultraxionTrashDone ? DONE : NOT_STARTED;
             return 0;
         }
 
         void WriteSaveDataMore(std::ostringstream& data) override
         {
-            data << uint32(_morchokTrashCleared ? 1 : 0) << ' ' << uint32(_hagaraIntroDone ? 1 : 0) << ' ';
+            data << uint32(_morchokTrashCleared ? 1 : 0) << ' ' << uint32(_hagaraIntroDone ? 1 : 0) << ' '
+                 << uint32(_ultraxionTrashDone ? 1 : 0) << ' ';
         }
 
         void ReadSaveDataMore(std::istringstream& data) override
@@ -214,6 +227,9 @@ public:
             uint32 hagaraIntro = 0;
             data >> hagaraIntro;
             _hagaraIntroDone = hagaraIntro != 0;
+            uint32 ultraxionTrash = 0;
+            data >> ultraxionTrash;
+            _ultraxionTrashDone = ultraxionTrash != 0;
         }
 
         // PNJ du temple blessés pendant le siège (couchés, aura de mort feinte) : debout après Morchok
@@ -302,6 +318,7 @@ public:
         bool _morchokTrashCleared;
         bool _morchokIntroDone;
         bool _hagaraIntroDone = false;
+        bool _ultraxionTrashDone = false;
         uint32 _morchokPacksCleared;
         std::unordered_map<ObjectGuid::LowType, uint32> _trashPackOf;
         std::unordered_map<ObjectGuid::LowType, Position> _trashHome;

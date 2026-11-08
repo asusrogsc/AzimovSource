@@ -54,6 +54,16 @@ struct npc_ds_travel : public ScriptedAI
 {
     npc_ds_travel(Creature* creature) : ScriptedAI(creature), _instance(creature->GetInstanceScript()) { }
 
+    // les portails du sniff sont « non sélectionnables » : on les rend cliquables
+    void Reset() override
+    {
+        me->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NOT_SELECTABLE);
+        me->SetFlag(UNIT_NPC_FLAGS, UNIT_NPC_FLAG_GOSSIP);
+        me->SetReactState(REACT_PASSIVE);
+    }
+
+    void UpdateAI(uint32 /*diff*/) override { }
+
     bool GossipHello(Player* player) override
     {
         ClearGossipMenuFor(player);

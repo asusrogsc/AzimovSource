@@ -52,7 +52,15 @@ enum DSDataTypes
 
     // Siege of Wyrmrest Temple
     DATA_MORCHOK_TRASH,         // SetData(DATA_MORCHOK_TRASH, spawnId) quand un trash meurt
-    DATA_HAGARA_INTRO_EVENT     // vagues de trash d'Hagara terminées (DONE)
+    DATA_HAGARA_INTRO_EVENT,    // vagues de trash d'Hagara terminées (DONE)
+
+    // Sommet du Repos du ver (Ultraxion)
+    DATA_ULTRAXION_TRASH,       // Assaillants du Crépuscule tués (DONE)
+    DATA_THRALL_SUMMIT,
+    DATA_ALEXSTRASZA_SUMMIT,
+    DATA_YSERA_SUMMIT,
+    DATA_KALECGOS_SUMMIT,
+    DATA_NOZDORMU_SUMMIT
 };
 
 enum DSCreatures
@@ -62,6 +70,7 @@ enum DSCreatures
     BOSS_WARLORD_ZONOZZ                         = 55308,
     BOSS_YORSAHJ_THE_UNSLEEPING                 = 55312,
     BOSS_HAGARA_THE_STORMBINDER                 = 55689,
+    BOSS_ULTRAXION                              = 55294,
     BOSS_MADNESS_OF_DEATHWING                   = 56173,
     NPC_KOHCROM                                 = 57773,
 
@@ -70,6 +79,13 @@ enum DSCreatures
     NPC_EARTHEN_SOLDIER                         = 57159,
     NPC_ANCIENT_WATER_LORD                      = 57160,
     NPC_TWILIGHT_SIEGE_CAPTAIN                  = 57280,
+
+    /*Wyrmrest Summit*/
+    NPC_ALEXSTRASZA_SUMMIT                      = 56630,
+    NPC_KALECGOS_SUMMIT                         = 56664,
+    NPC_YSERA_SUMMIT                            = 56665,
+    NPC_NOZDORMU_SUMMIT                         = 56666,
+    NPC_THRALL_SUMMIT                           = 56667,
 
     /*Madness of Deathwing*/
     NPC_DEATHWING_MADNESS_OF_DEATHWING          = 57962,
