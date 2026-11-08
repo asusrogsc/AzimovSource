@@ -34,6 +34,7 @@ void AddSC_custom_stats();
 void AddSC_azimov_power();
 void AddSC_azimov_level_scaling();
 void AddSC_azimov_void_elf();
+void AddSC_custom_echo_elements();
 
 void AddCustomScripts()
 {
@@ -51,4 +52,5 @@ void AddCustomScripts()
 	AddSC_azimov_power();
 	AddSC_azimov_level_scaling();
 	AddSC_azimov_void_elf();
+	AddSC_custom_echo_elements();
 }
