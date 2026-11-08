@@ -99,6 +99,9 @@ struct npc_ds_travel : public ScriptedAI
                 break;
             case NPC_TRAVEL_TO_WYRMREST_TEMPLE:
             case NPC_TRAVEL_TO_WYRMREST_BASE:
+                // le portail du sommet mène aussi à l'Œil de l'Éternité une fois les Gueules terminées
+                if (mawsDone && me->GetPositionZ() > 300.0f)
+                    AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Entrer dans l'Œil de l'Éternité.", GOSSIP_SENDER_MAIN, DEST_HAGARA);
                 AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Retourner au temple du Repos du ver.", GOSSIP_SENDER_MAIN, DEST_TEMPLE);
                 break;
             default:

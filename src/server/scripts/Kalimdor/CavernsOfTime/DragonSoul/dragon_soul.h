@@ -60,7 +60,11 @@ enum DSDataTypes
     DATA_ALEXSTRASZA_SUMMIT,
     DATA_YSERA_SUMMIT,
     DATA_KALECGOS_SUMMIT,
-    DATA_NOZDORMU_SUMMIT
+    DATA_NOZDORMU_SUMMIT,
+
+    // Brûleciel (Corne-Noire)
+    DATA_THE_SKYFIRE,
+    DATA_GORIONA
 };
 
 enum DSCreatures
@@ -71,6 +75,7 @@ enum DSCreatures
     BOSS_YORSAHJ_THE_UNSLEEPING                 = 55312,
     BOSS_HAGARA_THE_STORMBINDER                 = 55689,
     BOSS_ULTRAXION                              = 55294,
+    BOSS_WARMASTER_BLACKHORN                    = 56427,
     BOSS_MADNESS_OF_DEATHWING                   = 56173,
     NPC_KOHCROM                                 = 57773,
 
@@ -86,6 +91,10 @@ enum DSCreatures
     NPC_YSERA_SUMMIT                            = 56665,
     NPC_NOZDORMU_SUMMIT                         = 56666,
     NPC_THRALL_SUMMIT                           = 56667,
+
+    /*The Skyfire*/
+    NPC_THE_SKYFIRE_SHIP                        = 56598,
+    NPC_GORIONA_DRAKE                           = 56781,
 
     /*Madness of Deathwing*/
     NPC_DEATHWING_MADNESS_OF_DEATHWING          = 57962,
@@ -115,6 +124,7 @@ enum DSCreatures
 enum DSGameObjectIds
 {
     GO_THE_FOCUSING_IRIS                        = 210132,
+    GO_THE_SKYFIRE_DOCKED                       = 210210, // le navire amarré au sommet
     GO_ELEMENTIUM_FRAGMENT_10_NORMAL = 210079,
     GO_ELEMENTIUM_FRAGMENT_25_NORMAL = 210218,
     GO_ELEMENTIUM_FRAGMENT_25_LFR    = 210220,

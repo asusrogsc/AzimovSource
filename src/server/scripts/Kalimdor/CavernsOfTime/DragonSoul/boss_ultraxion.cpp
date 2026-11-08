@@ -34,6 +34,7 @@
 #include "SpellMgr.h"
 #include "SpellScript.h"
 #include "TemporarySummon.h"
+#include "StringFormat.h"
 #include "dragon_soul.h"
 
 namespace DragonSoul
@@ -82,9 +83,9 @@ enum UltraxionSpells
     SPELL_TIMELOOP                      = 105984,
     SPELL_TIMELOOP_HEAL                 = 105992,
 
-    // Assaillant du Crépuscule (IDs à confirmer avec le Spell.dbc du serveur)
-    SPELL_ASSAULTER_TWILIGHT_BREATH     = 95692,
-    SPELL_ASSAULTER_TWILIGHT_FLAMES     = 105817
+    // Assaillant du Crépuscule : sorts crépusculaires des drakes de l'Âme des dragons (présents en 4.3.4)
+    SPELL_ASSAULTER_TWILIGHT_BREATH     = 110212, // cône frontal
+    SPELL_ASSAULTER_TWILIGHT_FLAMES     = 108050  // missile => flammes au sol
 };
 
 enum UltraxionMisc
@@ -192,7 +193,7 @@ enum UltraxionEvents
 
 // Centre du sommet (l'Âme des dragons) et positions
 static Position const SummitCenter          = { -1786.72f, -2393.23f, 341.44f, 0.0f };
-static Position const UltraxionSpawnPos     = { -1689.47f, -2388.03f, 250.08f, 3.28f };
+static Position const UltraxionSpawnPos     = { -1699.47f, -2388.03f, 285.00f, 3.22f }; // sous le bord du sommet, côté est
 static Position const UltraxionFightPos     = { -1699.47f, -2388.03f, 355.19f, 3.22f };
 static Position const LootCachePos          = { -1753.63f, -2370.01f, 340.845f, 4.80f };
 static Position const BuffOrbPos[2]         =
@@ -348,6 +349,7 @@ struct npc_ds_thrall_summit : public ScriptedAI
         else
         {
             _state = RITUAL_TRASH;
+            AnnounceRemaining();
             if (Creature* ultraxion = SummonUltraxion())
                 ultraxion->AI()->DoAction(ACTION_START_RITUAL);
             _events.ScheduleEvent(EVENT_SPAWN_ASSAULTER, 8s);
@@ -372,6 +374,7 @@ struct npc_ds_thrall_summit : public ScriptedAI
             return;
 
         ++_killed;
+        AnnounceRemaining();
         if (_killed >= ASSAULTERS_TOTAL)
         {
             _state = RITUAL_ULTRAXION;
@@ -467,6 +470,20 @@ private:
             me->SetFlag(UNIT_NPC_FLAGS, UNIT_NPC_FLAG_GOSSIP);
         else
             me->RemoveFlag(UNIT_NPC_FLAGS, UNIT_NPC_FLAG_GOSSIP);
+    }
+
+    // décompte au centre de l'écran pour tout le raid
+    void AnnounceRemaining()
+    {
+        uint32 remaining = _killed < ASSAULTERS_TOTAL ? ASSAULTERS_TOTAL - _killed : 0;
+        for (auto const& ref : me->GetMap()->GetPlayers())
+            if (Player* player = ref.GetSource())
+            {
+                if (remaining)
+                    me->Whisper(Trinity::StringFormat("Assaillants du Crépuscule restants : %u / %u", remaining, ASSAULTERS_TOTAL), LANG_UNIVERSAL, player, true);
+                else
+                    me->Whisper("Tous les Assaillants du Crépuscule sont morts !", LANG_UNIVERSAL, player, true);
+            }
     }
 
     Creature* Aspect(uint32 data) const
@@ -674,7 +691,7 @@ struct npc_ds_twilight_assaulter : public ScriptedAI
                     case EVENT_AIR_FLAMES:
                         if (!_landing)
                             if (Player* target = RandomSummitPlayer())
-                                me->CastSpell(target, SPELL_ASSAULTER_TWILIGHT_FLAMES, true);
+                                me->CastSpell(target->GetPosition(), SPELL_ASSAULTER_TWILIGHT_FLAMES, CastSpellExtraArgs(true));
                         _events.Repeat(10s, 15s);
                         break;
                     case EVENT_AUTO_LAND:
@@ -706,7 +723,7 @@ struct npc_ds_twilight_assaulter : public ScriptedAI
                     break;
                 case EVENT_GROUND_FLAMES:
                     if (Unit* target = SelectTarget(SELECT_TARGET_RANDOM, 1, 40.0f, true))
-                        DoCast(target, SPELL_ASSAULTER_TWILIGHT_FLAMES);
+                        me->CastSpell(target->GetPosition(), SPELL_ASSAULTER_TWILIGHT_FLAMES, CastSpellExtraArgs(false));
                     _events.Repeat(14s, 18s);
                     break;
                 default:
@@ -875,7 +892,10 @@ struct boss_ultraxion : public BossAI
     void MovementInform(uint32 type, uint32 pointId) override
     {
         if (type == POINT_MOTION_TYPE && pointId == POINT_ULTRAXION_ARRIVED)
+        {
+            _arrived = true;
             me->SetFacingTo(UltraxionFightPos.GetOrientation());
+        }
     }
 
     void UpdateAI(uint32 diff) override
@@ -991,7 +1011,7 @@ private:
             case 1:
                 // Ultraxion surgit de sous le temple et se place face au sommet
                 me->SetVisible(true);
-                me->GetMotionMaster()->MovePoint(POINT_ULTRAXION_ARRIVED, UltraxionFightPos, false);
+                me->GetMotionMaster()->MovePoint(POINT_ULTRAXION_ARRIVED, UltraxionFightPos, false, 20.0f);
                 ZoneTalk(me, SAY_ULTRAXION_INTRO_1);
                 events.ScheduleEvent(EVENT_INTRO_LIGHTNING, 1s);
                 events.ScheduleEvent(EVENT_INTRO, 13s);
@@ -1013,6 +1033,14 @@ private:
     {
         events.Reset();
         _fightStarted = true;
+
+        // sécurité : s'il n'est pas arrivé à sa place, on l'y met avant le combat (il ne bouge plus ensuite)
+        if (!_arrived)
+        {
+            me->StopMoving();
+            me->NearTeleportTo(UltraxionFightPos.GetPositionX(), UltraxionFightPos.GetPositionY(), UltraxionFightPos.GetPositionZ(), UltraxionFightPos.GetOrientation());
+            _arrived = true;
+        }
         _unstableCount = 0;
         me->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NOT_SELECTABLE | UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_IMMUNE_TO_PC | UNIT_FLAG_IMMUNE_TO_NPC);
         me->SetReactState(REACT_AGGRESSIVE);
@@ -1188,6 +1216,7 @@ private:
     uint8 _unstableCount = 0;
     uint8 _introStep = 0;
     bool _arriving = false;
+    bool _arrived = false;
     bool _fightStarted = false;
 };
 
