@@ -16,6 +16,7 @@
  */
 
 #include "InstanceScript.h"
+#include "Map.h"
 #include "CreatureTextMgr.h"
 #include "Player.h"
 #include <sstream>
@@ -30,6 +31,7 @@ ObjectData const creatureData[] =
 {
     { BOSS_MORCHOK,                         DATA_MORCHOK                            },
     { BOSS_WARLORD_ZONOZZ,                  DATA_WARLORD_ZONOZZ                     },
+    { BOSS_YORSAHJ_THE_UNSLEEPING,          DATA_YORSAHJ_THE_UNSLEEPING             },
     { BOSS_MADNESS_OF_DEATHWING,            DATA_MADNESS_OF_DEATHWING               },
     { NPC_DEATHWING_MADNESS_OF_DEATHWING,   DATA_DEATHWING_MADNESS_OF_DEATHWING     },
     { NPC_THRALL_MADNESS_OF_DEATHWING,      DATA_THRALL_MADNESS_OF_DEATHWING        },
@@ -204,9 +206,53 @@ public:
             _morchokTrashCleared = cleared != 0;
         }
 
+        // PNJ du temple blessés pendant le siège (couchés, aura de mort feinte) : debout après Morchok
+        static bool IsWoundedTempleNpc(uint32 entry)
+        {
+            switch (entry)
+            {
+                case 27935: // Ferithos
+                case 27938: // Trizormu
+                case 27940: // Lethecus
+                case 27943: // Dalormi
+                case 27953: // Protecteur du Repos du ver
+                case 57682: // Tyrygosa
+                case 58036: // Demestrasz
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        static void WakeTempleNpc(Creature* creature)
+        {
+            creature->RemoveAurasDueToSpell(SPELL_TEMPLE_NPC_FEIGN_DEATH);
+            creature->SetStandState(UNIT_STAND_STATE_STAND);
+        }
+
+        bool SetBossState(uint32 type, EncounterState state) override
+        {
+            if (!InstanceScript::SetBossState(type, state))
+                return false;
+
+            if (type == DATA_MORCHOK && state == DONE)
+                for (ObjectGuid const& guid : _woundedTempleNpcs)
+                    if (Creature* npc = instance->GetCreature(guid))
+                        WakeTempleNpc(npc);
+
+            return true;
+        }
+
         void OnCreatureCreate(Creature* creature) override
         {
             InstanceScript::OnCreatureCreate(creature);
+
+            if (IsWoundedTempleNpc(creature->GetEntry()))
+            {
+                _woundedTempleNpcs.push_back(creature->GetGUID());
+                if (GetBossState(DATA_MORCHOK) == DONE)
+                    WakeTempleNpc(creature);
+            }
 
             if (IsMorchokTrash(creature) && creature->IsAlive() && !_morchokTrashCleared)
                 RegisterMorchokTrash(creature);
@@ -248,6 +294,8 @@ public:
         uint32 _morchokPacksCleared;
         std::unordered_map<ObjectGuid::LowType, uint32> _trashPackOf;
         std::unordered_map<ObjectGuid::LowType, Position> _trashHome;
+        std::vector<ObjectGuid> _woundedTempleNpcs;
+        static constexpr uint32 SPELL_TEMPLE_NPC_FEIGN_DEATH = 58951;
         std::vector<Position> _packAnchors;
         Position _morchokHome = { -1997.53f, -2408.27f, 70.18f, 0.0f };
         static constexpr float MORCHOK_TRASH_RANGE = 115.0f;

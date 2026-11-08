@@ -1,10 +1,10 @@
 /*
  * Azimov - Dragon Soul : déplacements dans le raid
  *
- * Eiendormi   -> Gueule de Go'rath (Zon'ozz)            après Morchok
- * Valeera     -> Gueule de Shu'ma (Yor'sahj)            après Morchok
- * Nethestrasz -> Œil de l'Éternité (Hagara)             après Zon'ozz et Yor'sahj
- *             -> Sommet du Repos du ver (Ultraxion)     après Hagara
+ * Valeera     -> Gueule de Go'rath (Zon'ozz)            après Morchok
+ * Eiendormi   -> Gueule de Shu'ma (Yor'sahj)            après Morchok
+ * Nethestrasz -> Sommet du Repos du ver (Thrall)        après Zon'ozz et Yor'sahj
+ * Portail du sommet -> Œil de l'Éternité (Hagara), portail de retour dans l'Œil
  * Eiendormi / Valeera dans les Gueules, "Travel to Wyrmrest Base" au sommet -> retour au temple
  *
  * Positions d'arrivée reprises d'AshamaneCore. Sur retail les dragons font un vol ;
@@ -26,7 +26,9 @@ enum TravelNpcs
     NPC_EIENDORMI                   = 57288,
     NPC_VALEERA                     = 57289,
     NPC_TRAVEL_TO_WYRMREST_TEMPLE   = 57328,
-    NPC_TRAVEL_TO_WYRMREST_BASE     = 57882
+    NPC_TRAVEL_TO_WYRMREST_BASE     = 57882,
+    NPC_TRAVEL_TO_EYE_OF_ETERNITY   = 57377, // portail au sommet, près de Thrall
+    NPC_TRAVEL_TO_WYRMREST_SUMMIT   = 57379  // portail de retour dans l'Œil de l'Éternité
 };
 
 enum TravelDestinations
@@ -58,7 +60,6 @@ struct npc_ds_travel : public ScriptedAI
 
         bool morchokDone  = Done(DATA_MORCHOK);
         bool mawsDone     = Done(DATA_WARLORD_ZONOZZ) && Done(DATA_YORSAHJ_THE_UNSLEEPING);
-        bool hagaraDone   = Done(DATA_HAGARA_THE_STORMBINDER);
 
         switch (me->GetEntry())
         {
@@ -66,19 +67,25 @@ struct npc_ds_travel : public ScriptedAI
                 if (InMaw())
                     AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Retourner au temple du Repos du ver.", GOSSIP_SENDER_MAIN, DEST_TEMPLE);
                 else if (morchokDone)
-                    AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Emmenez-moi à la Gueule de Go'rath.", GOSSIP_SENDER_MAIN, DEST_ZONOZZ);
+                    AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Emmenez-moi à la Gueule de Shu'ma.", GOSSIP_SENDER_MAIN, DEST_YORSAHJ);
                 break;
             case NPC_VALEERA:
                 if (InMaw())
                     AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Retourner au temple du Repos du ver.", GOSSIP_SENDER_MAIN, DEST_TEMPLE);
                 else if (morchokDone)
-                    AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Emmenez-moi à la Gueule de Shu'ma.", GOSSIP_SENDER_MAIN, DEST_YORSAHJ);
+                    AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Emmenez-moi à la Gueule de Go'rath.", GOSSIP_SENDER_MAIN, DEST_ZONOZZ);
                 break;
             case NPC_NETHESTRASZ:
+                // comme sur retail : Nethestrasz dépose le raid au sommet, près de Thrall
                 if (mawsDone)
-                    AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Emmenez-moi à l'Œil de l'Éternité.", GOSSIP_SENDER_MAIN, DEST_HAGARA);
-                if (hagaraDone)
                     AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Emmenez-moi au sommet du temple.", GOSSIP_SENDER_MAIN, DEST_SUMMIT);
+                break;
+            case NPC_TRAVEL_TO_EYE_OF_ETERNITY:
+                if (mawsDone)
+                    AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Entrer dans l'Œil de l'Éternité.", GOSSIP_SENDER_MAIN, DEST_HAGARA);
+                break;
+            case NPC_TRAVEL_TO_WYRMREST_SUMMIT:
+                AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Retourner au sommet du temple.", GOSSIP_SENDER_MAIN, DEST_SUMMIT);
                 break;
             case NPC_TRAVEL_TO_WYRMREST_TEMPLE:
             case NPC_TRAVEL_TO_WYRMREST_BASE:

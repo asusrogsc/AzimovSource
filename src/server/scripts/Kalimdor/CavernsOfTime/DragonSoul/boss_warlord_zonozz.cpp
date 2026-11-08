@@ -64,7 +64,12 @@ enum ZonozzNpcs
     NPC_VOID_OF_THE_UNMAKING            = 55334,
     NPC_EYE_OF_GORATH                   = 55416,
     NPC_FLAIL_OF_GORATH                 = 55417,
-    NPC_CLAW_OF_GORATH                  = 55418
+    NPC_CLAW_OF_GORATH                  = 55418,
+
+    // trash de la Gueule de Go'rath (mêmes sorts que les adds du combat)
+    NPC_EYE_OF_GORATH_TRASH             = 57875,
+    NPC_FLAIL_OF_GORATH_TRASH           = 57877,
+    NPC_CLAW_OF_GORATH_TRASH            = 57890
 };
 
 enum ZonozzEvents
@@ -520,9 +525,21 @@ struct npc_zonozz_tentacle : public ScriptedAI
         _events.Reset();
     }
 
+    // le trash utilise les mêmes sorts que les tentacules du combat
+    static uint32 Role(uint32 entry)
+    {
+        switch (entry)
+        {
+            case NPC_EYE_OF_GORATH_TRASH:   return NPC_EYE_OF_GORATH;
+            case NPC_FLAIL_OF_GORATH_TRASH: return NPC_FLAIL_OF_GORATH;
+            case NPC_CLAW_OF_GORATH_TRASH:  return NPC_CLAW_OF_GORATH;
+            default:                        return entry;
+        }
+    }
+
     void JustEngagedWith(Unit* /*who*/) override
     {
-        switch (me->GetEntry())
+        switch (Role(me->GetEntry()))
         {
             case NPC_EYE_OF_GORATH:
                 _events.ScheduleEvent(EVENT_T_SHADOW_GAZE, 3s, 8s);
@@ -582,7 +599,7 @@ struct npc_zonozz_tentacle : public ScriptedAI
                 return;
         }
 
-        if (me->GetEntry() != NPC_EYE_OF_GORATH)
+        if (Role(me->GetEntry()) != NPC_EYE_OF_GORATH)
             DoMeleeAttackIfReady();
     }
 
