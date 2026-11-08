@@ -1726,6 +1726,7 @@ enum TrainingDummy
     SPELL_PRIMAL_STRIKE                        = 73899,
     SPELL_IMMOLATE                             = 348,
     SPELL_ARCANE_MISSILES                      = 5143,
+    SPELL_SHADOW_WORD_PAIN                     = 589,
 };
 
 struct npc_training_dummy : NullCreatureAI
@@ -1759,6 +1760,7 @@ struct npc_training_dummy : NullCreatureAI
             case SPELL_PRIMAL_STRIKE:   // Primal Strike - Shaman
             case SPELL_IMMOLATE:        // Immolate - Warlock
             case SPELL_ARCANE_MISSILES: // Arcane Missiles - Mage
+            case SPELL_SHADOW_WORD_PAIN: // Mot de l'ombre : Douleur - Prêtre (quêtes « Apprendre le mot »)
                 if (caster->GetTypeId() == TYPEID_PLAYER)
                     caster->ToPlayer()->KilledMonsterCredit(NPC_SPELL_PRACTICE_CREDIT);
                 break;
