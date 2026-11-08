@@ -90,7 +90,7 @@ enum Races
     RACE_VOID_ELF           = 12, // Azimov : ancien Gangr'orc, devenu l'Elfe du Vide jouable (Alliance)
     //RACE_NAGA               = 13,
     //RACE_BROKEN             = 14,
-    //RACE_SKELETON           = 15,
+    RACE_MAGHAR_ORC         = 15, // Azimov : ancien Squelette (PNJ, deplace en 25), devenu l'Orc mag'har jouable (Horde)
     //RACE_VRYKUL             = 16,
     //RACE_TUSKARR            = 17,
     //RACE_FOREST_TROLL       = 18,
@@ -109,7 +109,7 @@ enum Races
      (1<<(RACE_NIGHTELF-1))|(1<<(RACE_UNDEAD_PLAYER-1))|(1<<(RACE_TAUREN-1))  | \
      (1<<(RACE_GNOME-1))   |(1<<(RACE_TROLL-1))        |(1<<(RACE_BLOODELF-1))| \
      (1<<(RACE_DRAENEI-1)) |(1<<(RACE_GOBLIN-1))       |(1<<(RACE_WORGEN-1))  | \
-     (1<<(RACE_VOID_ELF-1)))
+     (1<<(RACE_VOID_ELF-1))|(1<<(RACE_MAGHAR_ORC-1)))
 
 #define RACEMASK_ALLIANCE \
     ((1<<(RACE_HUMAN-1)) | (1<<(RACE_DWARF-1)) | (1<<(RACE_NIGHTELF-1)) | \
