@@ -49,7 +49,9 @@ namespace
     {
         int32 total = 0;
 
-        for (uint8 slot = EQUIPMENT_SLOT_START; slot < EQUIPMENT_SLOT_END; ++slot)
+        // Equipement (0-18) + emplacements de sacs (19-22) : le core applique
+        // aussi les sorts "Equipe :" des sacs, ils doivent compter dans le total.
+        for (uint8 slot = EQUIPMENT_SLOT_START; slot < INVENTORY_SLOT_BAG_END; ++slot)
         {
             Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
             if (!item || item->IsBroken())
