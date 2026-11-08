@@ -37,7 +37,8 @@ enum TravelDestinations
     DEST_YORSAHJ,
     DEST_ZONOZZ,
     DEST_SUMMIT,
-    DEST_HAGARA
+    DEST_HAGARA,
+    DEST_SKYFIRE
 };
 
 static Position const TravelPos[] =
@@ -47,7 +48,8 @@ static Position const TravelPos[] =
     { -1854.233154f, -3068.658691f, -178.34f, 0.46f }, // DEST_YORSAHJ : Gueule de Shu'ma
     { -1743.647827f, -1835.132568f, -220.51f, 4.53f }, // DEST_ZONOZZ  : Gueule de Go'rath
     { -1781.188477f, -2375.122559f, 341.35f, 4.43f  }, // DEST_SUMMIT  : sommet
-    { 13629.356445f, 13612.099609f, 123.49f, 3.14f  }  // DEST_HAGARA  : Œil de l'Éternité
+    { 13629.356445f, 13612.099609f, 123.49f, 3.14f  }, // DEST_HAGARA  : Œil de l'Éternité
+    { 13444.9f,      -12133.3f,     151.21f, 0.0f   }  // DEST_SKYFIRE : pont du Brûleciel
 };
 
 struct npc_ds_travel : public ScriptedAI
@@ -89,6 +91,9 @@ struct npc_ds_travel : public ScriptedAI
                 // comme sur retail : Nethestrasz dépose le raid au sommet, près de Thrall
                 if (mawsDone)
                     AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Emmenez-moi au sommet du temple.", GOSSIP_SENDER_MAIN, DEST_SUMMIT);
+                // après un wipe sur l'Échine (cimetière au temple) : retour direct sur le Brûleciel
+                if (Done(DATA_WARMASTER_BLACKHORN))
+                    AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Emmenez-moi sur le pont du Brûleciel.", GOSSIP_SENDER_MAIN, DEST_SKYFIRE);
                 break;
             case NPC_TRAVEL_TO_EYE_OF_ETERNITY:
                 if (mawsDone)
@@ -117,7 +122,7 @@ struct npc_ds_travel : public ScriptedAI
         uint32 dest = GetGossipActionFor(player, gossipListId);
         CloseGossipMenuFor(player);
 
-        if (dest >= DEST_TEMPLE && dest <= DEST_HAGARA && !player->IsInCombat())
+        if (dest >= DEST_TEMPLE && dest <= DEST_SKYFIRE && !player->IsInCombat())
         {
             Position const& pos = TravelPos[dest];
             player->NearTeleportTo(pos.GetPositionX(), pos.GetPositionY(), pos.GetPositionZ(), pos.GetOrientation());

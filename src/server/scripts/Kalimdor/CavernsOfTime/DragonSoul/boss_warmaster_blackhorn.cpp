@@ -396,7 +396,7 @@ struct npc_ds_sky_captain_swayze : public ScriptedAI
                 if (!blackhornDone && !_running)
                     AddGossipItemFor(player, GOSSIP_ICON_CHAT, "Rapprochez-nous.", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 2);
                 bool spineDone = _instance->GetBossState(DATA_SPINE_OF_DEATHWING) == DONE;
-                bool spineRunning = _instance->GetBossState(DATA_SPINE_OF_DEATHWING) == IN_PROGRESS;
+                bool spineRunning = SpineEncounterRunning();
                 if (blackhornDone && !spineDone && !spineRunning)
                     AddGossipItemFor(player, GOSSIP_ICON_CHAT, "Allons-y ! Sautons sur le dos d'Aile de mort.", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 4);
                 if (spineDone)
@@ -543,8 +543,7 @@ private:
     {
         if (_instance->GetBossState(DATA_WARMASTER_BLACKHORN) != DONE)
             return;
-        EncounterState spineState = _instance->GetBossState(DATA_SPINE_OF_DEATHWING);
-        if (spineState == DONE || spineState == IN_PROGRESS)
+        if (_instance->GetBossState(DATA_SPINE_OF_DEATHWING) == DONE || SpineEncounterRunning())
             return;
 
         for (Player* player : GetDeckPlayers(me->GetMap()))
@@ -559,6 +558,30 @@ private:
             spine = me->SummonCreature(BOSS_SPINE_OF_DEATHWING, SpineBossPos, TEMPSUMMON_MANUAL_DESPAWN);
         if (spine)
             spine->AI()->DoAction(1); // ACTION_START_SPINE (après l'arrivée du raid)
+    }
+
+    // le combat de l'Échine tourne seulement si l'Échine existe encore et qu'il reste quelqu'un sur le dos.
+    // Après un wipe, l'état « en cours » resté bloqué est remis à « échec » pour pouvoir relancer.
+    bool SpineEncounterRunning()
+    {
+        if (_instance->GetBossState(DATA_SPINE_OF_DEATHWING) != IN_PROGRESS)
+            return false;
+
+        Creature* spine = _instance->GetCreature(DATA_SPINE_OF_DEATHWING);
+        bool someoneOnSpine = false;
+        for (auto const& ref : me->GetMap()->GetPlayers())
+            if (Player* player = ref.GetSource())
+                if (player->IsAlive() && player->GetExactDist2d(SpineArrivalPos) < 150.0f)
+                    someoneOnSpine = true;
+
+        if (spine && spine->IsAlive() && someoneOnSpine)
+            return true;
+
+        if (spine && spine->IsAIEnabled())
+            spine->AI()->DoAction(4); // ACTION_RESET_SPINE : retire les adds et l'Échine
+        if (_instance->GetBossState(DATA_SPINE_OF_DEATHWING) == IN_PROGRESS)
+            _instance->SetBossState(DATA_SPINE_OF_DEATHWING, FAIL);
+        return false;
     }
 
     void UpdateSummitVisibility()

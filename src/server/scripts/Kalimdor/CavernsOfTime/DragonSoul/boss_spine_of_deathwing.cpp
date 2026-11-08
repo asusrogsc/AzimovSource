@@ -115,7 +115,8 @@ enum SpineActions
 {
     ACTION_START_SPINE  = 1,
     ACTION_TENDONS_DIED = 2,
-    ACTION_OPEN_TENDONS = 3
+    ACTION_OPEN_TENDONS = 3,
+    ACTION_RESET_SPINE  = 4
 };
 
 enum SpineMisc
@@ -153,7 +154,7 @@ static constexpr float SPINE_MIDDLE_X       = -13854.79f; // à gauche : x plus 
 static constexpr float SPINE_LEFT_LIMIT_X   = -13860.0f;
 static constexpr float SPINE_RIGHT_LIMIT_X  = -13850.3f;
 static constexpr float HOLE_HOLD_RANGE      = 6.0f;
-static constexpr float BLAST_TENDONS_RANGE  = 20.0f;
+static constexpr float BLAST_TENDONS_RANGE  = 30.0f;
 
 static void ZoneTalk(Creature* creature, uint8 group)
 {
@@ -218,6 +219,9 @@ struct npc_ds_spine_of_deathwing : public ScriptedAI
                 break;
             case ACTION_TENDONS_DIED:
                 PlateDestroyed();
+                break;
+            case ACTION_RESET_SPINE:
+                ResetEncounter();
                 break;
             default:
                 break;
@@ -731,7 +735,11 @@ struct npc_ds_spine_hideous_amalgamation : public ScriptedAI
 
         if (_absorbed < 9)
         {
-            Talk(EMOTE_NOT_ENOUGH_BLOOD);
+            if (!_warned)
+            {
+                _warned = true;
+                Talk(EMOTE_NOT_ENOUGH_BLOOD);
+            }
             return; // il meurt sans exploser
         }
 
@@ -825,17 +833,33 @@ private:
             uint32 plate = spine->AI()->GetData(0);
             if (plate < 3)
             {
+                // la plaque en cours (la 1re est la plus proche de l'arrivée) : on ouvre le tendon le plus proche,
+                // de préférence du côté où se trouve l'Amalgame
                 bool left = me->GetPositionX() <= SPINE_MIDDLE_X;
-                uint8 index = uint8(plate * 2 + (left ? 0 : 1));
-                std::list<Creature*> tendons;
-                me->GetCreatureListWithEntryInGrid(tendons, left ? NPC_BURNING_TENDONS_LEFT : NPC_BURNING_TENDONS_RIGHT, BLAST_TENDONS_RANGE);
-                for (Creature* tendon : tendons)
-                    if (tendon->IsAlive() && tendon->AI()->GetData(0) == index)
+                Creature* best = nullptr;
+                float bestDist = 0.0f;
+                for (uint32 entry : { uint32(NPC_BURNING_TENDONS_LEFT), uint32(NPC_BURNING_TENDONS_RIGHT) })
+                {
+                    std::list<Creature*> tendons;
+                    me->GetCreatureListWithEntryInGrid(tendons, entry, BLAST_TENDONS_RANGE);
+                    for (Creature* tendon : tendons)
                     {
-                        tendon->AI()->DoAction(ACTION_OPEN_TENDONS);
-                        opened = true;
-                        break;
+                        uint32 index = tendon->AI()->GetData(0);
+                        if (!tendon->IsAlive() || index / 2 != plate)
+                            continue;
+                        float dist = me->GetExactDist2d(tendon) - ((index % 2 == 0) == left ? 5.0f : 0.0f);
+                        if (!best || dist < bestDist)
+                        {
+                            best = tendon;
+                            bestDist = dist;
+                        }
                     }
+                }
+                if (best)
+                {
+                    best->AI()->DoAction(ACTION_OPEN_TENDONS);
+                    opened = true;
+                }
             }
         }
         if (!opened)
@@ -849,6 +873,7 @@ private:
     uint8 _absorbed = 0;
     bool _blasting = false;
     bool _resolved = false;
+    bool _warned = false;
 };
 
 // ===========================================================================
