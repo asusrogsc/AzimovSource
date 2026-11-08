@@ -2535,6 +2535,11 @@ int32 WorldObject::ModSpellDuration(SpellInfo const* spellInfo, WorldObject cons
         if (durationMod != 0)
             AddPct(duration, durationMod);
 
+        // Azimov - Sang sauvage (raciale orc mag'har 1001016) : -10 % durée des poisons, maladies et malédictions.
+        // Aura DUMMY côté DBC : l'aura 245 sur un sort custom fait planter le client 4.3.4 à l'entrée en jeu.
+        if (spellInfo->Dispel == DISPEL_POISON || spellInfo->Dispel == DISPEL_DISEASE || spellInfo->Dispel == DISPEL_CURSE)
+            if (unitTarget->HasAura(1001016))
+                AddPct(duration, -10);
     }
     else
     {
