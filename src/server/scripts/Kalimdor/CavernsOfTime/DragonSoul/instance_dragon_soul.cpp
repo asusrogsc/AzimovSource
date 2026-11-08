@@ -121,7 +121,24 @@ public:
             }
 
             _trashPackOf[spawnId] = packId;
+            _trashHome[spawnId] = creature->GetHomePosition();
             ++_packAlive[packId];
+        }
+
+        // Seuls les packs autour de Morchok comptent (comme sur retail) ; ceux de l'entrée
+        // et des portails font partie du décor du siège.
+        bool IsNearMorchok(Position const& pos) const
+        {
+            return pos.GetExactDist2d(_morchokHome) <= MORCHOK_TRASH_RANGE;
+        }
+
+        uint32 CountNearTrashAlive() const
+        {
+            uint32 count = 0;
+            for (auto const& pair : _trashHome)
+                if (_trashPackOf.count(pair.first) && IsNearMorchok(pair.second))
+                    ++count;
+            return count;
         }
 
         void OnMorchokTrashDied(ObjectGuid::LowType spawnId)
@@ -135,7 +152,7 @@ public:
 
             Creature* morchok = GetCreature(DATA_MORCHOK);
 
-            if (_packAlive[packId] && --_packAlive[packId] == 0)
+            if (_packAlive[packId] && --_packAlive[packId] == 0 && IsNearMorchok(_packAnchors[packId]))
             {
                 ++_morchokPacksCleared;
                 if (morchok)
@@ -147,7 +164,7 @@ public:
                 }
             }
 
-            if (_trashPackOf.empty())
+            if (!_morchokTrashCleared && CountNearTrashAlive() == 0)
             {
                 _morchokTrashCleared = true;
                 SaveToDB();
@@ -197,6 +214,7 @@ public:
             switch (creature->GetEntry())
             {
                 case BOSS_MORCHOK:
+                    _morchokHome = creature->GetHomePosition();
                     SetMorchokLocked(creature, !_morchokTrashCleared && GetBossState(DATA_MORCHOK) != DONE);
                     break;
                 case NPC_YSERA_MADNESS_OF_DEATHWING:
@@ -229,7 +247,10 @@ public:
         bool _morchokIntroDone;
         uint32 _morchokPacksCleared;
         std::unordered_map<ObjectGuid::LowType, uint32> _trashPackOf;
+        std::unordered_map<ObjectGuid::LowType, Position> _trashHome;
         std::vector<Position> _packAnchors;
+        Position _morchokHome = { -1997.53f, -2408.27f, 70.18f, 0.0f };
+        static constexpr float MORCHOK_TRASH_RANGE = 115.0f;
         std::vector<uint32> _packAlive;
     };
 
