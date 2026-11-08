@@ -31,6 +31,7 @@
 #include "PhasingHandler.h"
 #include "Player.h"
 #include "ScriptedCreature.h"
+#include "ScriptedGossip.h"
 #include "ScriptMgr.h"
 #include "SpellAuraEffects.h"
 #include "SpellScript.h"
@@ -1330,13 +1331,28 @@ struct npc_madness_of_deathwing_thrall : public ScriptedAI
 
     void Reset() override
     {
-        _instance->SetBossState(DATA_MADNESS_OF_DEATHWING, NOT_STARTED);
+        // Azimov : ne pas effacer une victoire déjà enregistrée
+        if (_instance->GetBossState(DATA_MADNESS_OF_DEATHWING) != DONE)
+            _instance->SetBossState(DATA_MADNESS_OF_DEATHWING, NOT_STARTED);
+    }
+
+    // Azimov : le combat ne se lance qu'une fois l'Échine d'Aile de mort vaincue, et pas deux fois
+    bool GossipHello(Player* player) override
+    {
+        if (_instance->GetBossState(DATA_SPINE_OF_DEATHWING) == DONE && _instance->GetBossState(DATA_MADNESS_OF_DEATHWING) != DONE)
+            return false; // menu normal de la base (option de lancement)
+
+        ClearGossipMenuFor(player);
+        SendGossipMenuFor(player, player->GetGossipTextId(me), me->GetGUID());
+        return true;
     }
 
     bool GossipSelect(Player* /*player*/, uint32 menuId, uint32 /*optionIndex*/) override
     {
         if (_instance->GetBossState(DATA_MADNESS_OF_DEATHWING) == IN_PROGRESS)
             return false;
+        if (_instance->GetBossState(DATA_SPINE_OF_DEATHWING) != DONE || _instance->GetBossState(DATA_MADNESS_OF_DEATHWING) == DONE)
+            return true;
 
         if (menuId == GOSSIP_MENU_START_ENCOUNTER)
         {

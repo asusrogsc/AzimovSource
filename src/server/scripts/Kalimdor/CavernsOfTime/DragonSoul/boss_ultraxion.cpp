@@ -83,9 +83,9 @@ enum UltraxionSpells
     SPELL_TIMELOOP                      = 105984,
     SPELL_TIMELOOP_HEAL                 = 105992,
 
-    // Assaillant du Crépuscule : sorts crépusculaires des drakes de l'Âme des dragons (présents en 4.3.4)
-    SPELL_ASSAULTER_TWILIGHT_BREATH     = 110212, // cône frontal
-    SPELL_ASSAULTER_TWILIGHT_FLAMES     = 108050  // missile => flammes au sol
+    // Assaillant du Crépuscule : sorts crépusculaires déjà utilisés par des créatures de ce core
+    SPELL_ASSAULTER_TWILIGHT_BREATH     = 78143,  // Souffle crépusculaire (cône frontal)
+    SPELL_ASSAULTER_TWILIGHT_FLAMES     = 79564   // Boule de feu crépusculaire (lancée en vol sur un joueur)
 };
 
 enum UltraxionMisc
@@ -115,8 +115,7 @@ enum UltraxionMisc
 enum UltraxionTexts
 {
     // Ultraxion
-    SAY_ULTRAXION_RITUAL        = 0, // "It is good to see you again, Alexstrasza..."
-    SAY_ULTRAXION_TRASH_DONE    = 1, // "Mere whelps, experiments..."
+    // (groupes 0 et 1 : répliques déplacées vers Aile de mort)
     SAY_ULTRAXION_INTRO_1       = 2,
     SAY_ULTRAXION_INTRO_2       = 3,
     SAY_ULTRAXION_AGGRO         = 4,
@@ -156,6 +155,12 @@ enum UltraxionTexts
     SAY_YSERA_DISTURBANCE       = 1,
     SAY_YSERA_ESSENCE           = 2,
 
+    // Aile de mort (survole le temple)
+    SAY_DW_GOOD_TO_SEE_YOU      = 0, // début du rituel
+    SAY_DW_TWISTING_WHELPS      = 1, // après « Ils ne sont plus ma couvée »
+    SAY_DW_MERE_WHELPS          = 2, // tous les Assaillants morts
+    SAY_DW_ULTIMATE_CREATION    = 3, // Ultraxion surgit
+
     // Nozdormu
     SAY_NOZ_NOT_UNEXPECTED      = 0,
     SAY_NOZ_TIMELOOP            = 1
@@ -165,10 +170,12 @@ enum UltraxionEvents
 {
     // Thrall
     EVENT_CONVERSATION = 1,
+    EVENT_GOSSIP_CHECK,
     EVENT_SPAWN_ASSAULTER,
     EVENT_CHECK_WIPE,
     EVENT_ULTRAXION_ARRIVE,
     EVENT_OUTRO,
+    EVENT_DEATHWING_TWISTING,
 
     // Ultraxion
     EVENT_INTRO,
@@ -195,12 +202,17 @@ enum UltraxionEvents
 static Position const SummitCenter          = { -1786.72f, -2393.23f, 341.44f, 0.0f };
 static Position const UltraxionSpawnPos     = { -1699.47f, -2388.03f, 285.00f, 3.22f }; // sous le bord du sommet, côté est
 static Position const UltraxionFightPos     = { -1699.47f, -2388.03f, 355.19f, 3.22f };
-static Position const LootCachePos          = { -1753.63f, -2370.01f, 340.845f, 4.80f };
+// au sud du sommet, loin du Brûleciel amarré (sa coque empêchait de cliquer sur la cache)
+static Position const LootCachePos          = { -1786.00f, -2414.00f, 341.10f, 1.57f };
 static Position const BuffOrbPos[2]         =
 {
     { -1756.24f, -2385.01f, 340.807f, 0.0f },
     { -1755.99f, -2395.31f, 340.803f, 0.0f }
 };
+
+static Position const DeathwingCirclePos    = { -1586.72f, -2393.23f, 400.0f, 1.57f };
+static constexpr float  DEATHWING_CIRCLE_RADIUS = 200.0f;
+static constexpr float  DEATHWING_CIRCLE_Z      = 400.0f;
 
 static constexpr float  ASSAULTER_CIRCLE_RADIUS = 34.0f;
 static constexpr float  ASSAULTER_CIRCLE_Z      = 357.0f;
@@ -286,6 +298,8 @@ struct npc_ds_thrall_summit : public ScriptedAI
         _killed = 0;
         me->SetReactState(REACT_PASSIVE);
         UpdateGossipFlag();
+        // Hagara peut mourir après l'apparition de Thrall : on réévalue régulièrement le dialogue
+        _events.ScheduleEvent(EVENT_GOSSIP_CHECK, 2s);
 
         if (_instance && _instance->GetBossState(DATA_ULTRAXION) != DONE)
             StopWards();
@@ -337,6 +351,7 @@ struct npc_ds_thrall_summit : public ScriptedAI
 
         _events.CancelEvent(EVENT_CONVERSATION);
         StartWards();
+        SummonDeathwing();
         me->RemoveFlag(UNIT_NPC_FLAGS, UNIT_NPC_FLAG_GOSSIP);
 
         if (action == GOSSIP_ACTION_INFO_DEF + 2)
@@ -392,13 +407,16 @@ struct npc_ds_thrall_summit : public ScriptedAI
         switch (action)
         {
             case ACTION_ULTRAXION_WIPE:
+                _summons.DespawnEntry(NPC_DEATHWING_SUMMIT);
                 _events.Reset();
+                _events.ScheduleEvent(EVENT_GOSSIP_CHECK, 2s);
                 _summons.DespawnEntry(NPC_TWILIGHT_ASSAULTER);
                 _state = RITUAL_IDLE;
                 StopWards();
                 UpdateGossipFlag();
                 break;
             case ACTION_ULTRAXION_DEAD:
+                _summons.DespawnEntry(NPC_DEATHWING_SUMMIT);
                 _events.Reset();
                 _state = RITUAL_IDLE;
                 StopWards();
@@ -421,6 +439,11 @@ struct npc_ds_thrall_summit : public ScriptedAI
                 case EVENT_CONVERSATION:
                     NextConversationLine();
                     break;
+                case EVENT_GOSSIP_CHECK:
+                    if (_state == RITUAL_IDLE)
+                        UpdateGossipFlag();
+                    _events.Repeat(2s);
+                    break;
                 case EVENT_SPAWN_ASSAULTER:
                     SpawnAssaulters();
                     break;
@@ -439,6 +462,9 @@ struct npc_ds_thrall_summit : public ScriptedAI
                         ultraxion->AI()->DoAction(ACTION_ULTRAXION_ARRIVE);
                     else if (Creature* summoned = SummonUltraxion())
                         summoned->AI()->DoAction(ACTION_ULTRAXION_ARRIVE);
+                    break;
+                case EVENT_DEATHWING_TWISTING:
+                    ZoneTalk(Aspect(DATA_DEATHWING_SUMMIT), SAY_DW_TWISTING_WHELPS);
                     break;
                 case EVENT_OUTRO:
                     if (_outroStep == 0)
@@ -524,6 +550,15 @@ private:
             }
     }
 
+    // Aile de mort tourne autour du temple pendant tout le rituel
+    void SummonDeathwing()
+    {
+        if (Creature* deathwing = Aspect(DATA_DEATHWING_SUMMIT))
+            if (deathwing->IsAlive())
+                return;
+        me->SummonCreature(NPC_DEATHWING_SUMMIT, DeathwingCirclePos, TEMPSUMMON_MANUAL_DESPAWN);
+    }
+
     Creature* SummonUltraxion()
     {
         if (_instance)
@@ -564,7 +599,10 @@ private:
         }
 
         if (firstWave)
+        {
             ZoneTalk(Aspect(DATA_ALEXSTRASZA_SUMMIT), SAY_ALEX_MY_CLUTCH);
+            _events.ScheduleEvent(EVENT_DEATHWING_TWISTING, 6s);
+        }
     }
 
     // ---- conversations -------------------------------------------------------
@@ -618,6 +656,49 @@ private:
 };
 
 // ===========================================================================
+// Aile de mort : survole le temple en cercle, intouchable, et commente le rituel
+// ===========================================================================
+struct npc_ds_deathwing_summit : public ScriptedAI
+{
+    npc_ds_deathwing_summit(Creature* creature) : ScriptedAI(creature) { }
+
+    void InitializeAI() override
+    {
+        me->SetReactState(REACT_PASSIVE);
+        me->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NOT_SELECTABLE | UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_IMMUNE_TO_PC | UNIT_FLAG_IMMUNE_TO_NPC);
+        me->RemoveFlag(UNIT_DYNAMIC_FLAGS, UNIT_DYNFLAG_DEAD);
+        me->SetStandState(UNIT_STAND_STATE_STAND);
+        me->SetCanFly(true);
+        me->SetDisableGravity(true);
+        me->SetAnimTier(AnimTier::Fly);
+        me->setActive(true);
+    }
+
+    void Reset() override { }
+    void EnterEvadeMode(EvadeReason /*why*/) override { }
+
+    void IsSummonedBy(Unit* /*summoner*/) override
+    {
+        // dans la base il a 0 PV (multiplicateur de vie nul) : il apparaît comme un cadavre.
+        // on lui donne de la vie et on le remet debout, en vol
+        if (me->GetMaxHealth() <= 1)
+            me->SetMaxHealth(100000000);
+        me->SetFullHealth();
+        if (me->isDead())
+            me->setDeathState(ALIVE);
+        me->SetStandState(UNIT_STAND_STATE_STAND);
+        me->SetUInt32Value(UNIT_NPC_EMOTESTATE, 0);
+        me->RemoveFlag(UNIT_DYNAMIC_FLAGS, UNIT_DYNFLAG_DEAD);
+        me->RemoveFlag(UNIT_FIELD_FLAGS_2, UNIT_FLAG2_FEIGN_DEATH);
+        me->SetAnimTier(AnimTier::Fly);
+        me->GetMotionMaster()->MoveCirclePath(SummitCenter.GetPositionX(), SummitCenter.GetPositionY(), DEATHWING_CIRCLE_Z,
+            DEATHWING_CIRCLE_RADIUS, true, 16);
+    }
+
+    void UpdateAI(uint32 /*diff*/) override { }
+};
+
+// ===========================================================================
 // Assaillant du Crépuscule : tourne au-dessus du sommet, se pose quand on le provoque
 // ===========================================================================
 struct npc_ds_twilight_assaulter : public ScriptedAI
@@ -645,7 +726,7 @@ struct npc_ds_twilight_assaulter : public ScriptedAI
             SummitCenter.GetPositionY() + ASSAULTER_CIRCLE_RADIUS * std::sin(angle), ASSAULTER_CIRCLE_Z);
         me->GetMotionMaster()->MovePoint(POINT_ASSAULTER_CIRCLE, entry, false);
 
-        _events.ScheduleEvent(EVENT_AIR_FLAMES, 8s, 12s);
+        _events.ScheduleEvent(EVENT_AIR_FLAMES, 4s, 6s);
         _events.ScheduleEvent(EVENT_AUTO_LAND, 50s, 60s);
     }
 
@@ -691,8 +772,8 @@ struct npc_ds_twilight_assaulter : public ScriptedAI
                     case EVENT_AIR_FLAMES:
                         if (!_landing)
                             if (Player* target = RandomSummitPlayer())
-                                me->CastSpell(target->GetPosition(), SPELL_ASSAULTER_TWILIGHT_FLAMES, CastSpellExtraArgs(true));
-                        _events.Repeat(10s, 15s);
+                                me->CastSpell(target, SPELL_ASSAULTER_TWILIGHT_FLAMES, true);
+                        _events.Repeat(7s, 10s);
                         break;
                     case EVENT_AUTO_LAND:
                         Land(nullptr);
@@ -719,12 +800,12 @@ struct npc_ds_twilight_assaulter : public ScriptedAI
             {
                 case EVENT_BREATH:
                     DoCastVictim(SPELL_ASSAULTER_TWILIGHT_BREATH);
-                    _events.Repeat(12s, 16s);
+                    _events.Repeat(9s, 12s);
                     break;
                 case EVENT_GROUND_FLAMES:
                     if (Unit* target = SelectTarget(SELECT_TARGET_RANDOM, 1, 40.0f, true))
-                        me->CastSpell(target->GetPosition(), SPELL_ASSAULTER_TWILIGHT_FLAMES, CastSpellExtraArgs(false));
-                    _events.Repeat(14s, 18s);
+                        DoCast(target, SPELL_ASSAULTER_TWILIGHT_FLAMES);
+                    _events.Repeat(10s, 14s);
                     break;
                 default:
                     break;
@@ -768,8 +849,8 @@ private:
         me->SetCanFly(false);
         me->SetReactState(REACT_AGGRESSIVE);
         _events.Reset();
-        _events.ScheduleEvent(EVENT_BREATH, 6s, 9s);
-        _events.ScheduleEvent(EVENT_GROUND_FLAMES, 10s, 14s);
+        _events.ScheduleEvent(EVENT_BREATH, 2s, 4s);
+        _events.ScheduleEvent(EVENT_GROUND_FLAMES, 5s, 7s);
 
         Unit* target = _taunter.IsEmpty() ? nullptr : ObjectAccessor::GetUnit(*me, _taunter);
         if (!target || !target->IsAlive())
@@ -816,13 +897,14 @@ struct boss_ultraxion : public BossAI
         switch (action)
         {
             case ACTION_START_RITUAL:
-                ZoneTalk(me, SAY_ULTRAXION_RITUAL);
+                ZoneTalk(Deathwing(), SAY_DW_GOOD_TO_SEE_YOU);
                 break;
             case ACTION_ULTRAXION_ARRIVE:
                 if (_arriving)
                     break;
                 _arriving = true;
-                ZoneTalk(me, SAY_ULTRAXION_TRASH_DONE);
+                ZoneTalk(Deathwing(), SAY_DW_MERE_WHELPS);
+                ShowAtSpawn();
                 _introStep = 0;
                 events.ScheduleEvent(EVENT_INTRO, 8s);
                 break;
@@ -831,6 +913,7 @@ struct boss_ultraxion : public BossAI
                     break;
                 _arriving = true;
                 _introStep = 1;
+                ShowAtSpawn();
                 events.ScheduleEvent(EVENT_INTRO, 2s);
                 break;
             case ACTION_ULTRAXION_ERUPTION:
@@ -872,8 +955,8 @@ struct boss_ultraxion : public BossAI
         _JustDied();
         Talk(SAY_ULTRAXION_DEATH);
         CleanupEncounter();
-        me->SetDisableGravity(false);
-        me->SetCanFly(false);
+        // son corps resterait suspendu en l'air : il disparaît, le butin est dans la cache
+        me->DespawnOrUnsummon(4s);
 
         uint32 cacheEntry = GO_LESSER_CACHE_10N;
         switch (me->GetMap()->GetDifficulty())
@@ -883,7 +966,11 @@ struct boss_ultraxion : public BossAI
             case RAID_DIFFICULTY_25MAN_HEROIC: cacheEntry = GO_LESSER_CACHE_25H; break;
             default: break;
         }
-        me->SummonGameObject(cacheEntry, LootCachePos, QuaternionData::fromEulerAnglesZYX(LootCachePos.GetOrientation(), 0.0f, 0.0f), WEEK);
+        if (GameObject* cache = me->SummonGameObject(cacheEntry, LootCachePos, QuaternionData::fromEulerAnglesZYX(LootCachePos.GetOrientation(), 0.0f, 0.0f), WEEK))
+        {
+            // la cache doit être ouvrable par le raid (le sniff lui donne des drapeaux « verrouillé / non sélectionnable »)
+            cache->RemoveFlag(GAMEOBJECT_FLAGS, GO_FLAG_LOCKED | GO_FLAG_NOT_SELECTABLE | GO_FLAG_INTERACT_COND | GO_FLAG_IN_USE);
+        }
 
         if (Creature* thrall = instance->GetCreature(DATA_THRALL_SUMMIT))
             thrall->AI()->DoAction(ACTION_ULTRAXION_DEAD);
@@ -891,10 +978,13 @@ struct boss_ultraxion : public BossAI
 
     void MovementInform(uint32 type, uint32 pointId) override
     {
-        if (type == POINT_MOTION_TYPE && pointId == POINT_ULTRAXION_ARRIVED)
+        if ((type == POINT_MOTION_TYPE || type == EFFECT_MOTION_TYPE) && pointId == POINT_ULTRAXION_ARRIVED)
         {
             _arrived = true;
             me->SetFacingTo(UltraxionFightPos.GetOrientation());
+            // les éclairs cosmétiques seulement une fois en place (un sort lancé coupe le vol)
+            if (!_fightStarted)
+                events.ScheduleEvent(EVENT_INTRO_LIGHTNING, 500ms);
         }
     }
 
@@ -1009,18 +1099,21 @@ private:
                 events.ScheduleEvent(EVENT_INTRO, 7s);
                 break;
             case 1:
-                // Ultraxion surgit de sous le temple et se place face au sommet
-                me->SetVisible(true);
-                me->GetMotionMaster()->MovePoint(POINT_ULTRAXION_ARRIVED, UltraxionFightPos, false, 20.0f);
-                ZoneTalk(me, SAY_ULTRAXION_INTRO_1);
-                events.ScheduleEvent(EVENT_INTRO_LIGHTNING, 1s);
-                events.ScheduleEvent(EVENT_INTRO, 13s);
+                // Ultraxion surgit de sous le temple et monte en volant jusqu'à sa place (~7 s)
+                ShowAtSpawn();
+                me->GetMotionMaster()->MovePoint(POINT_ULTRAXION_ARRIVED, UltraxionFightPos, false, 10.0f);
+                ZoneTalk(Deathwing(), SAY_DW_ULTIMATE_CREATION);
+                events.ScheduleEvent(EVENT_INTRO, 8s);
                 break;
             case 2:
+                ZoneTalk(me, SAY_ULTRAXION_INTRO_1);
+                events.ScheduleEvent(EVENT_INTRO, 12s);
+                break;
+            case 3:
                 ZoneTalk(me, SAY_ULTRAXION_INTRO_2);
                 events.ScheduleEvent(EVENT_INTRO, 10s);
                 break;
-            case 3:
+            case 4:
                 StartFight();
                 break;
             default:
@@ -1029,18 +1122,36 @@ private:
         ++_introStep;
     }
 
+    // visible et en vol sous le bord du sommet avant de monter (le client voit ainsi tout le trajet)
+    void ShowAtSpawn()
+    {
+        if (!me->IsVisible())
+            me->SetVisible(true);
+        // la base le marque « immobile » (enraciné) : sans ça il ne peut pas monter et finit téléporté
+        me->SetControlled(false, UNIT_STATE_ROOT);
+        me->ClearUnitState(UNIT_STATE_ROOT);
+        KeepFlying();
+    }
+
+    Creature* Deathwing() const
+    {
+        return instance ? instance->GetCreature(DATA_DEATHWING_SUMMIT) : nullptr;
+    }
+
     void StartFight()
     {
         events.Reset();
         _fightStarted = true;
 
         // sécurité : s'il n'est pas arrivé à sa place, on l'y met avant le combat (il ne bouge plus ensuite)
-        if (!_arrived)
+        // on se fie à sa position réelle, pas seulement à l'avis du générateur de mouvement
+        if (!_arrived || me->GetExactDist(UltraxionFightPos) > 5.0f)
         {
             me->StopMoving();
             me->NearTeleportTo(UltraxionFightPos.GetPositionX(), UltraxionFightPos.GetPositionY(), UltraxionFightPos.GetPositionZ(), UltraxionFightPos.GetOrientation());
             _arrived = true;
         }
+        KeepFlying();
         _unstableCount = 0;
         me->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NOT_SELECTABLE | UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_IMMUNE_TO_PC | UNIT_FLAG_IMMUNE_TO_NPC);
         me->SetReactState(REACT_AGGRESSIVE);
@@ -1067,6 +1178,15 @@ private:
         events.ScheduleEvent(EVENT_YSERA_ESSENCE, 155s);
         events.ScheduleEvent(EVENT_KALEC_SOURCE, 215s);
         events.ScheduleEvent(EVENT_NOZ_TIMELOOP, 5min);
+    }
+
+    // il plane en permanence (animation de vol, pas de « sol invisible »)
+    void KeepFlying()
+    {
+        me->SetCanFly(true);
+        me->SetDisableGravity(true);
+        me->SetAnimTier(AnimTier::Fly);
+        me->SetPlayHoverAnim(true);
     }
 
     // Ultraxion reste visible pour les joueurs passés dans le royaume du Crépuscule
@@ -1412,6 +1532,7 @@ void AddSC_boss_ultraxion()
     using namespace DragonSoul;
     RegisterDragonSoulCreatureAI(npc_ds_thrall_summit);
     RegisterDragonSoulCreatureAI(npc_ds_twilight_assaulter);
+    RegisterDragonSoulCreatureAI(npc_ds_deathwing_summit);
     RegisterDragonSoulCreatureAI(boss_ultraxion);
     RegisterGameObjectAI(go_ds_ultraxion_buff_orb);
     RegisterSpellScript(spell_ultraxion_twilight_instability);

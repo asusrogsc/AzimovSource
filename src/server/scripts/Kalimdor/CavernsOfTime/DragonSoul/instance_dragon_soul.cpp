@@ -40,9 +40,11 @@ ObjectData const creatureData[] =
     { NPC_YSERA_SUMMIT,                     DATA_YSERA_SUMMIT                       },
     { NPC_KALECGOS_SUMMIT,                  DATA_KALECGOS_SUMMIT                    },
     { NPC_NOZDORMU_SUMMIT,                  DATA_NOZDORMU_SUMMIT                    },
+    { NPC_DEATHWING_SUMMIT,                 DATA_DEATHWING_SUMMIT                   },
     { BOSS_WARMASTER_BLACKHORN,             DATA_WARMASTER_BLACKHORN                },
     { NPC_THE_SKYFIRE_SHIP,                 DATA_THE_SKYFIRE                        },
     { NPC_GORIONA_DRAKE,                    DATA_GORIONA                            },
+    { BOSS_SPINE_OF_DEATHWING,              DATA_SPINE_OF_DEATHWING                 },
     { BOSS_MADNESS_OF_DEATHWING,            DATA_MADNESS_OF_DEATHWING               },
     { NPC_DEATHWING_MADNESS_OF_DEATHWING,   DATA_DEATHWING_MADNESS_OF_DEATHWING     },
     { NPC_THRALL_MADNESS_OF_DEATHWING,      DATA_THRALL_MADNESS_OF_DEATHWING        },
@@ -56,6 +58,9 @@ ObjectData const creatureData[] =
 
 ObjectData const gameobjectData[] =
 {
+    { GO_DEATHWING_BACK_PLATE_1,            DATA_BACK_PLATE_1                       },
+    { GO_DEATHWING_BACK_PLATE_2,            DATA_BACK_PLATE_2                       },
+    { GO_DEATHWING_BACK_PLATE_3,            DATA_BACK_PLATE_3                       },
     { 0, 0 } // END
 };
 

@@ -26,6 +26,7 @@
 #include "Player.h"
 #include "ScriptedCreature.h"
 #include "ScriptedGossip.h"
+#include "Spell.h"
 #include "SpellAuraEffects.h"
 #include "SpellAuras.h"
 #include "SpellInfo.h"
@@ -48,6 +49,7 @@ enum BlackhornSpells
     // Goriona
     SPELL_TWILIGHT_ONSLAUGHT_VISUAL = 107927,
     SPELL_TWILIGHT_ONSLAUGHT        = 107588,
+    SPELL_TWILIGHT_ONSLAUGHT_DAMAGE = 106401,
     SPELL_BROADSIDE                 = 110153,
     SPELL_TWILIGHT_BREATH           = 110212,
     SPELL_CONSUMING_SHROUD          = 110214,
@@ -84,6 +86,7 @@ enum BlackhornNpcs
     NPC_TWILIGHT_SAPPER             = 56923,
     NPC_ONSLAUGHT_TARGET            = 57238,
     NPC_ENGINE_STALKER              = 57190,
+    NPC_TWILIGHT_FLAMES             = 57268, // flaques laissées par les Flammes du Crépuscule de Goriona
     NPC_SKYFIRE_HARPOON_GUN         = 56681
 };
 
@@ -191,6 +194,9 @@ enum BlackhornPoints
 // ---------------------------------------------------------------------------
 static Position const SkyfireDeckPos     = { 13444.9f, -12133.3f, 151.21f, 0.0f };
 static Position const SwayzeSummitPos    = { -1781.19f, -2375.12f, 341.35f, 4.43f }; // retour au sommet
+static Position const SpineArrivalPos    = { -13854.67f, -13666.97f, 275.0f, 1.60f };  // dos d'Aile de mort
+static Position const SpineBossPos       = { -13852.5f, -13665.38f, 297.3786f, 1.53589f };
+static Position const MaelstromPos       = { -12081.39f, 12160.05f, 30.60f, 6.03f };  // plate-forme de la Folie
 static Position const BlackhornDeckPos   = { 13465.208f, -12134.354f, 151.18f, 3.07f };
 static Position const AddsPos[2]         =
 {
@@ -389,6 +395,12 @@ struct npc_ds_sky_captain_swayze : public ScriptedAI
             {
                 if (!blackhornDone && !_running)
                     AddGossipItemFor(player, GOSSIP_ICON_CHAT, "Rapprochez-nous.", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 2);
+                bool spineDone = _instance->GetBossState(DATA_SPINE_OF_DEATHWING) == DONE;
+                bool spineRunning = _instance->GetBossState(DATA_SPINE_OF_DEATHWING) == IN_PROGRESS;
+                if (blackhornDone && !spineDone && !spineRunning)
+                    AddGossipItemFor(player, GOSSIP_ICON_CHAT, "Allons-y ! Sautons sur le dos d'Aile de mort.", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 4);
+                if (spineDone)
+                    AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Emmenez-nous au Maelström.", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 5);
                 if (!_running)
                     AddGossipItemFor(player, GOSSIP_ICON_TAXI, "Retourner au sommet du Repos du ver.", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 3);
             }
@@ -417,6 +429,13 @@ struct npc_ds_sky_captain_swayze : public ScriptedAI
                 break;
             case GOSSIP_ACTION_INFO_DEF + 3:
                 player->NearTeleportTo(SwayzeSummitPos.GetPositionX(), SwayzeSummitPos.GetPositionY(), SwayzeSummitPos.GetPositionZ(), SwayzeSummitPos.GetOrientation());
+                break;
+            case GOSSIP_ACTION_INFO_DEF + 4:
+                StartSpine();
+                break;
+            case GOSSIP_ACTION_INFO_DEF + 5:
+                if (_instance->GetBossState(DATA_SPINE_OF_DEATHWING) == DONE)
+                    player->NearTeleportTo(MaelstromPos.GetPositionX(), MaelstromPos.GetPositionY(), MaelstromPos.GetPositionZ(), MaelstromPos.GetOrientation());
                 break;
             default:
                 break;
@@ -519,6 +538,29 @@ struct npc_ds_sky_captain_swayze : public ScriptedAI
     }
 
 private:
+    // Échine d'Aile de mort : cinématique, tout le pont saute sur son dos, puis le combat démarre
+    void StartSpine()
+    {
+        if (_instance->GetBossState(DATA_WARMASTER_BLACKHORN) != DONE)
+            return;
+        EncounterState spineState = _instance->GetBossState(DATA_SPINE_OF_DEATHWING);
+        if (spineState == DONE || spineState == IN_PROGRESS)
+            return;
+
+        for (Player* player : GetDeckPlayers(me->GetMap()))
+        {
+            player->SendMovieStart(74);
+            player->NearTeleportTo(SpineArrivalPos.GetPositionX() + frand(-3.0f, 3.0f), SpineArrivalPos.GetPositionY() + frand(-3.0f, 3.0f),
+                SpineArrivalPos.GetPositionZ(), SpineArrivalPos.GetOrientation());
+        }
+
+        Creature* spine = _instance->GetCreature(DATA_SPINE_OF_DEATHWING);
+        if (!spine || !spine->IsAlive())
+            spine = me->SummonCreature(BOSS_SPINE_OF_DEATHWING, SpineBossPos, TEMPSUMMON_MANUAL_DESPAWN);
+        if (spine)
+            spine->AI()->DoAction(1); // ACTION_START_SPINE (après l'arrivée du raid)
+    }
+
     void UpdateSummitVisibility()
     {
         bool visible = _instance && _instance->GetBossState(DATA_ULTRAXION) == DONE;
@@ -771,6 +813,7 @@ struct boss_warmaster_blackhorn : public BossAI
     {
         _JustDied();
         Talk(SAY_BLACKHORN_DEATH);
+        DespawnFlames();
         if (Creature* goriona = instance->GetCreature(DATA_GORIONA))
             goriona->DespawnOrUnsummon();
         instance->DoRemoveAurasDueToSpellOnPlayers(SPELL_CONSUMING_SHROUD);
@@ -914,6 +957,7 @@ private:
                 me->GetMotionMaster()->MoveJump(BlackhornDeckPos, 20.0f, 15.0f);
                 me->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NOT_SELECTABLE | UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_IMMUNE_TO_PC);
                 me->SetReactState(REACT_AGGRESSIVE);
+                me->SetUnkillable(false); // la base le marque « intuable » (resterait bloqué à 1 PV)
                 Talk(SAY_BLACKHORN_PHASE_2);
                 DoZoneInCombat();
                 DoCastSelf(SPELL_VENGEANCE, true);
@@ -954,10 +998,19 @@ private:
         events.ScheduleEvent(EVENT_SHOCKWAVE_END, 3s);
     }
 
+    void DespawnFlames()
+    {
+        std::list<Creature*> flames;
+        me->GetCreatureListWithEntryInGrid(flames, NPC_TWILIGHT_FLAMES, 200.0f);
+        for (Creature* flame : flames)
+            flame->DespawnOrUnsummon();
+    }
+
     void Cleanup()
     {
         events.Reset();
         summons.DespawnAll();
+        DespawnFlames();
         if (Creature* goriona = instance->GetCreature(DATA_GORIONA))
             goriona->DespawnOrUnsummon();
         instance->DoRemoveAurasDueToSpellOnPlayers(SPELL_CONSUMING_SHROUD);
@@ -1074,6 +1127,7 @@ struct npc_ds_goriona : public ScriptedAI
                         target->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NOT_SELECTABLE);
                         target->CastSpell(target, SPELL_TWILIGHT_ONSLAUGHT_VISUAL, true);
                     }
+                    _onslaughtPos = pos;
                     me->CastSpell(pos, SPELL_TWILIGHT_ONSLAUGHT, CastSpellExtraArgs(false));
                     _events.Repeat(35s);
                     break;
@@ -1118,8 +1172,41 @@ struct npc_ds_goriona : public ScriptedAI
             DoMeleeAttackIfReady();
     }
 
+    // Assaut crépusculaire : les dégâts sont partagés entre les joueurs dans la zone (7 m) et le Brûleciel.
+    // Calcul fait ici pour ne pas dépendre du ciblage du sort de dégâts.
+    void OnSpellCastFinished(SpellInfo const* spell, SpellFinishReason reason) override
+    {
+        if (spell->Id != SPELL_TWILIGHT_ONSLAUGHT || reason != SPELL_FINISHED_SUCCESSFUL_CAST)
+            return;
+
+        uint32 total = 800000;
+        switch (me->GetMap()->GetDifficulty())
+        {
+            case RAID_DIFFICULTY_25MAN_NORMAL: total = 2000000; break;
+            case RAID_DIFFICULTY_10MAN_HEROIC: total = 1200000; break;
+            case RAID_DIFFICULTY_25MAN_HEROIC: total = 3000000; break;
+            default: break;
+        }
+
+        std::vector<Player*> soakers;
+        for (Player* player : GetDeckPlayers(me->GetMap()))
+            if (player->GetExactDist2d(_onslaughtPos) <= 7.0f)
+                soakers.push_back(player);
+
+        uint32 share = total / uint32(soakers.size() + 1);
+        for (Player* player : soakers)
+        {
+            me->SendSpellNonMeleeDamageLog(player, SPELL_TWILIGHT_ONSLAUGHT_DAMAGE, share, SPELL_SCHOOL_MASK_SHADOW, 0, 0, false, 0);
+            Unit::DealDamage(me, player, share, 0, SPELL_DIRECT_DAMAGE, SPELL_SCHOOL_MASK_SHADOW, nullptr, false);
+        }
+        if (Creature* ship = GetShip(me))
+            me->SendSpellNonMeleeDamageLog(ship, SPELL_TWILIGHT_ONSLAUGHT_DAMAGE, share, SPELL_SCHOOL_MASK_SHADOW, 0, 0, false, 0);
+        DamageShip(me, share);
+    }
+
 private:
     EventMap _events;
+    Position _onslaughtPos;
     uint8 _phase = 0; // 1 survol, 2 bout du pont, 3 posée (héroïque), 4 fuite
 };
 
@@ -1455,8 +1542,8 @@ class spell_ds_twilight_barrage_damage : public SpellScript
     }
 };
 
-// 106401 - Twilight Onslaught (dégâts) : partagés entre les joueurs ET le Brûleciel
-class spell_ds_twilight_onslaught_damage : public SpellScript
+// 106401 - Twilight Onslaught (dégâts) : n'est plus utilisé, Goriona calcule le partage elle-même
+class [[maybe_unused]] spell_ds_twilight_onslaught_damage : public SpellScript
 {
     void FilterTargets(std::list<WorldObject*>& targets)
     {
@@ -1537,7 +1624,6 @@ void AddSC_boss_warmaster_blackhorn()
     RegisterDragonSoulCreatureAI(npc_ds_twilight_infiltrator);
     RegisterDragonSoulCreatureAI(npc_ds_twilight_sapper);
     RegisterSpellScript(spell_ds_twilight_barrage_damage);
-    RegisterSpellScript(spell_ds_twilight_onslaught_damage);
     RegisterSpellScript(spell_ds_broadside);
     RegisterSpellScript(spell_ds_consuming_shroud);
     RegisterSpellScript(spell_ds_blackhorn_vengeance);

@@ -61,10 +61,16 @@ enum DSDataTypes
     DATA_YSERA_SUMMIT,
     DATA_KALECGOS_SUMMIT,
     DATA_NOZDORMU_SUMMIT,
+    DATA_DEATHWING_SUMMIT,
 
     // Brûleciel (Corne-Noire)
     DATA_THE_SKYFIRE,
-    DATA_GORIONA
+    DATA_GORIONA,
+
+    // Échine d'Aile de mort
+    DATA_BACK_PLATE_1,
+    DATA_BACK_PLATE_2,
+    DATA_BACK_PLATE_3
 };
 
 enum DSCreatures
@@ -76,6 +82,7 @@ enum DSCreatures
     BOSS_HAGARA_THE_STORMBINDER                 = 55689,
     BOSS_ULTRAXION                              = 55294,
     BOSS_WARMASTER_BLACKHORN                    = 56427,
+    BOSS_SPINE_OF_DEATHWING                     = 53879,
     BOSS_MADNESS_OF_DEATHWING                   = 56173,
     NPC_KOHCROM                                 = 57773,
 
@@ -91,6 +98,7 @@ enum DSCreatures
     NPC_YSERA_SUMMIT                            = 56665,
     NPC_NOZDORMU_SUMMIT                         = 56666,
     NPC_THRALL_SUMMIT                           = 56667,
+    NPC_DEATHWING_SUMMIT                        = 55971, // survole le temple pendant le rituel
 
     /*The Skyfire*/
     NPC_THE_SKYFIRE_SHIP                        = 56598,
@@ -125,6 +133,13 @@ enum DSGameObjectIds
 {
     GO_THE_FOCUSING_IRIS                        = 210132,
     GO_THE_SKYFIRE_DOCKED                       = 210210, // le navire amarré au sommet
+    GO_DEATHWING_BACK_PLATE_1                   = 209623,
+    GO_DEATHWING_BACK_PLATE_2                   = 209631,
+    GO_DEATHWING_BACK_PLATE_3                   = 209632,
+    GO_GREATER_CACHE_10N                        = 209894,
+    GO_GREATER_CACHE_25N                        = 209895,
+    GO_GREATER_CACHE_10H                        = 209896,
+    GO_GREATER_CACHE_25H                        = 209897,
     GO_ELEMENTIUM_FRAGMENT_10_NORMAL = 210079,
     GO_ELEMENTIUM_FRAGMENT_25_NORMAL = 210218,
     GO_ELEMENTIUM_FRAGMENT_25_LFR    = 210220,
