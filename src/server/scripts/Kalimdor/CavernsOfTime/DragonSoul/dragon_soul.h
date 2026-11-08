@@ -51,7 +51,8 @@ enum DSDataTypes
     DATA_TAIL_TENTACLE_MADNESS_OF_DEATHWING,
 
     // Siege of Wyrmrest Temple
-    DATA_MORCHOK_TRASH          // SetData(DATA_MORCHOK_TRASH, spawnId) quand un trash meurt
+    DATA_MORCHOK_TRASH,         // SetData(DATA_MORCHOK_TRASH, spawnId) quand un trash meurt
+    DATA_HAGARA_INTRO_EVENT     // vagues de trash d'Hagara terminées (DONE)
 };
 
 enum DSCreatures
@@ -60,6 +61,7 @@ enum DSCreatures
     BOSS_MORCHOK                                = 55265,
     BOSS_WARLORD_ZONOZZ                         = 55308,
     BOSS_YORSAHJ_THE_UNSLEEPING                 = 55312,
+    BOSS_HAGARA_THE_STORMBINDER                 = 55689,
     BOSS_MADNESS_OF_DEATHWING                   = 56173,
     NPC_KOHCROM                                 = 57773,
 
@@ -96,6 +98,7 @@ enum DSCreatures
 
 enum DSGameObjectIds
 {
+    GO_THE_FOCUSING_IRIS                        = 210132,
     GO_ELEMENTIUM_FRAGMENT_10_NORMAL = 210079,
     GO_ELEMENTIUM_FRAGMENT_25_NORMAL = 210218,
     GO_ELEMENTIUM_FRAGMENT_25_LFR    = 210220,

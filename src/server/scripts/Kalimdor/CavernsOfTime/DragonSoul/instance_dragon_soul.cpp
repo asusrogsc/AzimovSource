@@ -32,6 +32,7 @@ ObjectData const creatureData[] =
     { BOSS_MORCHOK,                         DATA_MORCHOK                            },
     { BOSS_WARLORD_ZONOZZ,                  DATA_WARLORD_ZONOZZ                     },
     { BOSS_YORSAHJ_THE_UNSLEEPING,          DATA_YORSAHJ_THE_UNSLEEPING             },
+    { BOSS_HAGARA_THE_STORMBINDER,          DATA_HAGARA_THE_STORMBINDER             },
     { BOSS_MADNESS_OF_DEATHWING,            DATA_MADNESS_OF_DEATHWING               },
     { NPC_DEATHWING_MADNESS_OF_DEATHWING,   DATA_DEATHWING_MADNESS_OF_DEATHWING     },
     { NPC_THRALL_MADNESS_OF_DEATHWING,      DATA_THRALL_MADNESS_OF_DEATHWING        },
@@ -182,6 +183,10 @@ public:
                 case DATA_MORCHOK_TRASH:
                     OnMorchokTrashDied(ObjectGuid::LowType(data));
                     break;
+                case DATA_HAGARA_INTRO_EVENT:
+                    _hagaraIntroDone = data == DONE;
+                    SaveToDB();
+                    break;
                 default:
                     break;
             }
@@ -191,12 +196,14 @@ public:
         {
             if (type == DATA_MORCHOK_TRASH)
                 return _morchokTrashCleared ? 1 : 0;
+            if (type == DATA_HAGARA_INTRO_EVENT)
+                return _hagaraIntroDone ? DONE : NOT_STARTED;
             return 0;
         }
 
         void WriteSaveDataMore(std::ostringstream& data) override
         {
-            data << uint32(_morchokTrashCleared ? 1 : 0) << ' ';
+            data << uint32(_morchokTrashCleared ? 1 : 0) << ' ' << uint32(_hagaraIntroDone ? 1 : 0) << ' ';
         }
 
         void ReadSaveDataMore(std::istringstream& data) override
@@ -204,6 +211,9 @@ public:
             uint32 cleared = 0;
             data >> cleared;
             _morchokTrashCleared = cleared != 0;
+            uint32 hagaraIntro = 0;
+            data >> hagaraIntro;
+            _hagaraIntroDone = hagaraIntro != 0;
         }
 
         // PNJ du temple blessés pendant le siège (couchés, aura de mort feinte) : debout après Morchok
@@ -291,6 +301,7 @@ public:
     private:
         bool _morchokTrashCleared;
         bool _morchokIntroDone;
+        bool _hagaraIntroDone = false;
         uint32 _morchokPacksCleared;
         std::unordered_map<ObjectGuid::LowType, uint32> _trashPackOf;
         std::unordered_map<ObjectGuid::LowType, Position> _trashHome;
