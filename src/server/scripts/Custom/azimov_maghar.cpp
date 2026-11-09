@@ -9,6 +9,8 @@
  *   1001016 Sang sauvage             (passif, -10 % durée des poisons, maladies et malédictions)
  *   1001017 Vigueur sympathique      (passif, toutes les 2 s donne 1001018 aux familiers : +10 % vie)
  *   1001019 Loup redoutable mag'har  (monture, apprise au niveau 20, PNJ 1000097)
+ * Quête 1001002 « Le sang de Draenor » : chaque autre quête rendue compte pour l'objectif
+ *   (crédit sur l'entrée de Grommash 1000098, 3 requis).
  * Les sorts sont dans Spell.dbc (client + serveur). Ce script les apprend aux mag'har
  * à chaque connexion et retire les raciaux orc hérités du modèle.
  */
@@ -52,6 +54,8 @@ namespace
     };
 
     constexpr uint32 SPELL_MAGHAR_MOUNT = 1001019;
+    constexpr uint32 QUEST_GROMMASH_PROOF = 1001002;
+    constexpr uint32 NPC_GROMMASH_CREDIT  = 1000098;
     constexpr uint8  MAGHAR_MOUNT_LEVEL = 20;
 
     constexpr int32  ANCESTRAL_CALL_VERSATILITY = 400;
@@ -83,6 +87,21 @@ public:
     {
         if (player && player->getRace() == RACE_AZIMOV_MAGHAR_ORC)
             LearnMountIfReady(player);
+    }
+
+    // Toute autre quête rendue compte pour « Le sang de Draenor »
+    void OnQuestStatusChange(Player* player, uint32 questId) override
+    {
+        if (!player || questId == QUEST_GROMMASH_PROOF)
+            return;
+
+        if (player->GetQuestStatus(QUEST_GROMMASH_PROOF) != QUEST_STATUS_INCOMPLETE)
+            return;
+
+        if (player->GetQuestStatus(questId) != QUEST_STATUS_REWARDED)
+            return;
+
+        player->KilledMonsterCredit(NPC_GROMMASH_CREDIT);
     }
 
 private:

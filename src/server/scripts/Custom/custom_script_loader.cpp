@@ -37,6 +37,7 @@ void AddSC_azimov_void_elf();
 void AddSC_custom_echo_elements();
 void AddSC_custom_garde_lumiere();
 void AddSC_azimov_maghar();
+void AddSC_azimov_account_mounts();
 
 void AddCustomScripts()
 {
@@ -57,4 +58,5 @@ void AddCustomScripts()
 	AddSC_custom_echo_elements();
 	AddSC_custom_garde_lumiere();
 	AddSC_azimov_maghar();
+	AddSC_azimov_account_mounts();
 }
