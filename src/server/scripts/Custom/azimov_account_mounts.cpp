@@ -1,12 +1,14 @@
 /*
- * Azimov - Montures liées au compte (comme sur retail)
+ * Azimov - Montures et mascottes liées au compte (comme sur retail)
  *
- * Toute monture apprise par un personnage est enregistrée dans `account_mounts`
- * (base characters). À chaque connexion, le personnage apprend toutes les montures
- * du compte, y compris les montures de classe et de faction.
+ * Toute monture ou mascotte apprise par un personnage est enregistrée dans
+ * `account_mounts` / `account_pets` (base characters). À chaque connexion, le
+ * personnage apprend toute la collection du compte (montures de classe et de
+ * faction comprises).
  *
- * Une monture = sort actif du grimoire qui applique l'aura MOUNTED (78)
- * ou qui appartient à la compétence Montures (777).
+ * Monture  = sort actif du grimoire avec l'aura MOUNTED (78) ou de la compétence Montures (777).
+ * Mascotte = sort actif de la compétence Mascottes (778) ou qui invoque un mini-familier
+ *            (effet SUMMON avec SummonProperties 41, utilisé aussi par les mascottes custom).
  */
 
 #include "ScriptMgr.h"
@@ -15,55 +17,104 @@
 #include "Spell.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
-#include "WorldSession.h"
 #include "StringFormat.h"
+#include "WorldSession.h"
 #include <string>
 
 namespace
 {
     // Sorts « monture » à ne pas partager (changement de forme racial)
     constexpr uint32 SPELL_RUNNING_WILD = 87840; // Course sauvage (worgen)
+    constexpr int32  SUMMON_PROPERTIES_MINIPET = 41;
 
-    bool IsAccountMountSpell(uint32 spellId)
+    enum class CollectionType { None, Mount, Pet };
+
+    bool IsAccountMountSpell(SpellInfo const* info)
     {
-        if (spellId == SPELL_RUNNING_WILD)
-            return false;
-
-        SpellInfo const* info = sSpellMgr->GetSpellInfo(spellId);
-        if (!info || info->IsPassive())
+        if (info->Id == SPELL_RUNNING_WILD)
             return false;
 
         if (info->HasAura(SPELL_AURA_MOUNTED))
             return true;
 
-        return IsPartOfSkillLine(SKILL_MOUNTS, spellId);
+        return IsPartOfSkillLine(SKILL_MOUNTS, info->Id);
     }
 
-    void SaveAccountMount(uint32 accountId, uint32 spellId)
+    bool IsAccountPetSpell(SpellInfo const* info)
     {
-        CharacterDatabase.PExecute("INSERT IGNORE INTO account_mounts (account, spell) VALUES (%u, %u)", accountId, spellId);
+        if (IsPartOfSkillLine(SKILL_COMPANIONS, info->Id))
+            return true;
+
+        for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+            if (info->Effects[i].Effect == SPELL_EFFECT_SUMMON && info->Effects[i].MiscValueB == SUMMON_PROPERTIES_MINIPET)
+                return true;
+
+        return false;
     }
 
-    void SaveCharacterMounts(Player* player)
+    CollectionType GetCollectionType(uint32 spellId)
+    {
+        SpellInfo const* info = sSpellMgr->GetSpellInfo(spellId);
+        if (!info || info->IsPassive())
+            return CollectionType::None;
+
+        if (IsAccountMountSpell(info))
+            return CollectionType::Mount;
+
+        if (IsAccountPetSpell(info))
+            return CollectionType::Pet;
+
+        return CollectionType::None;
+    }
+
+    char const* TableFor(CollectionType type)
+    {
+        return type == CollectionType::Mount ? "account_mounts" : "account_pets";
+    }
+
+    void SaveCollectionSpell(uint32 accountId, uint32 spellId, CollectionType type)
+    {
+        CharacterDatabase.PExecute("INSERT IGNORE INTO %s (account, spell) VALUES (%u, %u)", TableFor(type), accountId, spellId);
+    }
+
+    void SaveCharacterCollection(Player* player)
     {
         uint32 accountId = player->GetSession()->GetAccountId();
-        std::string values;
+        std::string mounts, pets;
         for (auto const& [spellId, spell] : player->GetSpellMap())
         {
             if (spell.state == PLAYERSPELL_REMOVED || spell.disabled)
                 continue;
 
-            if (!IsAccountMountSpell(spellId))
+            CollectionType type = GetCollectionType(spellId);
+            if (type == CollectionType::None)
                 continue;
 
+            std::string& values = type == CollectionType::Mount ? mounts : pets;
             if (!values.empty())
                 values += ',';
             values += Trinity::StringFormat("(%u,%u)", accountId, spellId);
         }
 
-        // Une seule requête pour toutes les montures du personnage
-        if (!values.empty())
-            CharacterDatabase.Execute(("INSERT IGNORE INTO account_mounts (account, spell) VALUES " + values).c_str());
+        // Une seule requête par table pour tout le personnage
+        if (!mounts.empty())
+            CharacterDatabase.Execute(("INSERT IGNORE INTO account_mounts (account, spell) VALUES " + mounts).c_str());
+        if (!pets.empty())
+            CharacterDatabase.Execute(("INSERT IGNORE INTO account_pets (account, spell) VALUES " + pets).c_str());
+    }
+
+    void LearnAccountCollection(Player* player, char const* table)
+    {
+        QueryResult result = CharacterDatabase.PQuery("SELECT spell FROM %s WHERE account = %u", table, player->GetSession()->GetAccountId());
+        if (!result)
+            return;
+
+        do
+        {
+            uint32 spellId = (*result)[0].GetUInt32();
+            if (!player->HasSpell(spellId) && GetCollectionType(spellId) != CollectionType::None)
+                player->LearnSpell(spellId, false);
+        } while (result->NextRow());
     }
 }
 
@@ -77,38 +128,34 @@ public:
         if (!player)
             return;
 
-        // 1) Les montures de ce personnage rejoignent la collection du compte
-        SaveCharacterMounts(player);
+        // 1) La collection de ce personnage rejoint celle du compte
+        SaveCharacterCollection(player);
 
         // 2) Le personnage apprend toute la collection du compte
-        QueryResult result = CharacterDatabase.PQuery("SELECT spell FROM account_mounts WHERE account = %u", player->GetSession()->GetAccountId());
-        if (!result)
-            return;
-
-        do
-        {
-            uint32 spellId = (*result)[0].GetUInt32();
-            if (!player->HasSpell(spellId) && IsAccountMountSpell(spellId))
-                player->LearnSpell(spellId, false);
-        } while (result->NextRow());
+        LearnAccountCollection(player, "account_mounts");
+        LearnAccountCollection(player, "account_pets");
     }
 
-    // Sauvegarde automatique et déconnexion : enregistre les montures apprises entre-temps
+    // Sauvegarde automatique et déconnexion : enregistre ce qui a été appris entre-temps
     void OnSave(Player* player) override
     {
         if (player)
-            SaveCharacterMounts(player);
+            SaveCharacterCollection(player);
     }
 
-    // Une monture invoquée est forcément connue : on l'ajoute tout de suite à la collection
+    // Une monture ou une mascotte invoquée est forcément connue : ajout immédiat à la collection
     void OnSpellCast(Player* player, Spell* spell, bool /*skipCheck*/) override
     {
         if (!player || !spell || !spell->GetSpellInfo())
             return;
 
         uint32 spellId = spell->GetSpellInfo()->Id;
-        if (player->HasSpell(spellId) && IsAccountMountSpell(spellId))
-            SaveAccountMount(player->GetSession()->GetAccountId(), spellId);
+        if (!player->HasSpell(spellId))
+            return;
+
+        CollectionType type = GetCollectionType(spellId);
+        if (type != CollectionType::None)
+            SaveCollectionSpell(player->GetSession()->GetAccountId(), spellId, type);
     }
 };
 
