@@ -697,6 +697,9 @@ class TC_GAME_API PlayerScript : public ScriptObject
         // Called when a player is about to be saved.
         virtual void OnSave(Player* /*player*/) { }
 
+        // Azimov : un objet arrive dans l'inventaire (sacs, banque) ou est équipé
+        virtual void OnItemObtained(Player* /*player*/, uint32 /*itemEntry*/) { }
+
         // Called when a player is bound to an instance
         virtual void OnBindToInstance(Player* /*player*/, Difficulty /*difficulty*/, uint32 /*mapId*/, bool /*permanent*/, uint8 /*extendState*/) { }
 
@@ -1032,6 +1035,7 @@ class TC_GAME_API ScriptMgr
         void OnPlayerDelete(ObjectGuid guid, uint32 accountId);
         void OnPlayerFailedDelete(ObjectGuid guid, uint32 accountId);
         void OnPlayerSave(Player* player);
+        void OnPlayerItemObtained(Player* player, uint32 itemEntry);
         void OnPlayerBindToInstance(Player* player, Difficulty difficulty, uint32 mapid, bool permanent, uint8 extendState);
         void OnPlayerUpdateZone(Player* player, uint32 newZone, uint32 newArea);
         void OnQuestStatusChange(Player* player, uint32 questId);

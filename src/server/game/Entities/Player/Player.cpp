@@ -10987,6 +10987,8 @@ Item* Player::StoreItem(ItemPosCountVec const& dest, Item* pItem, bool update)
     if (!pItem)
         return nullptr;
 
+    uint32 obtainedEntry = pItem->GetEntry(); // Azimov : pItem peut être supprimé s'il rejoint une pile
+
     Item* lastItem = pItem;
     for (ItemPosCountVec::const_iterator itr = dest.begin(); itr != dest.end();)
     {
@@ -11003,6 +11005,8 @@ Item* Player::StoreItem(ItemPosCountVec const& dest, Item* pItem, bool update)
 
         lastItem = _StoreItem(pos, pItem, count, true, update);
     }
+
+    sScriptMgr->OnPlayerItemObtained(this, obtainedEntry);
     return lastItem;
 }
 
@@ -11123,6 +11127,8 @@ Item* Player::EquipNewItem(uint16 pos, uint32 item, bool update)
 
 Item* Player::EquipItem(uint16 pos, Item* pItem, bool update)
 {
+    sScriptMgr->OnPlayerItemObtained(this, pItem->GetEntry());
+
     AddEnchantmentDurations(pItem);
     AddItemDurations(pItem);
 

@@ -39,6 +39,8 @@ void AddSC_custom_garde_lumiere();
 void AddSC_azimov_maghar();
 void AddSC_azimov_account_mounts();
 void AddSC_azimov_account_toys();
+void AddSC_azimov_account_heirlooms();
+void AddSC_azimov_account_appearances();
 
 void AddCustomScripts()
 {
@@ -61,4 +63,6 @@ void AddCustomScripts()
 	AddSC_azimov_maghar();
 	AddSC_azimov_account_mounts();
 	AddSC_azimov_account_toys();
+	AddSC_azimov_account_heirlooms();
+	AddSC_azimov_account_appearances();
 }
