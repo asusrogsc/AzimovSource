@@ -16,6 +16,8 @@
  */
 
 #include "Player.h"
+#include "Chat.h"
+#include "Map.h"
 #include "Containers.h"
 #include "ScriptMgr.h"
 #include "SpellScript.h"
@@ -1633,6 +1635,47 @@ class spell_westfall_sniper_fire : public SpellScript
 };
 }
 
+// Azimov : « L'aube d'un nouveau jour » (26297) : l'événement du rassemblement de Ruisselune ne démarre pas.
+// On valide l'objectif quand le joueur arrive au cœur de Ruisselune (point d'intérêt de la quête).
+static constexpr uint32 QUEST_DAWNING_OF_A_NEW_DAY = 26297;
+static Position const MoonbrookGatheringPos = { -11013.0f, 1475.0f, 47.0f, 0.0f };
+static constexpr float MOONBROOK_GATHERING_RADIUS = 45.0f;
+
+class world_map_azimov_moonbrook_gathering : public WorldMapScript
+{
+public:
+    world_map_azimov_moonbrook_gathering() : WorldMapScript("world_map_azimov_moonbrook_gathering", 0) { }
+
+    void OnUpdate(Map* map, uint32 diff) override
+    {
+        if (_timer > diff)
+        {
+            _timer -= diff;
+            return;
+        }
+        _timer = 2000;
+
+        for (auto const& ref : map->GetPlayers())
+        {
+            Player* player = ref.GetSource();
+            if (!player || !player->IsInWorld() || !player->IsAlive())
+                continue;
+
+            if (player->GetQuestStatus(QUEST_DAWNING_OF_A_NEW_DAY) != QUEST_STATUS_INCOMPLETE)
+                continue;
+
+            if (player->GetExactDist2d(MoonbrookGatheringPos.GetPositionX(), MoonbrookGatheringPos.GetPositionY()) > MOONBROOK_GATHERING_RADIUS)
+                continue;
+
+            ChatHandler(player->GetSession()).PSendSysMessage("|cffffd700Vous vous mêlez à la foule et entendez la Silhouette promettre une « aube nouvelle » aux sans-abri de la Marche de l'Ouest…|r");
+            player->CompleteQuest(QUEST_DAWNING_OF_A_NEW_DAY);
+        }
+    }
+
+private:
+    uint32 _timer = 2000;
+};
+
 void AddSC_westfall()
 {
     using namespace Westfall;
@@ -1657,4 +1700,5 @@ void AddSC_westfall()
     RegisterCreatureAI(npc_westfall_west_plains_drifter);
     RegisterSpellScript(spell_westfall_sniper_fire_proc);
     RegisterSpellScript(spell_westfall_sniper_fire);
+    new world_map_azimov_moonbrook_gathering();
 }
