@@ -427,11 +427,21 @@ public:
         if (!quest)
             return;
 
+        // les quêtes donnent aussi la monnaie 900 (comme les monstres), sinon le gain est invisible
+        auto reward = [player](uint32 points)
+        {
+            if (!points)
+                return;
+            if (s_cfg.CurrencyId)
+                player->ModifyCurrency(s_cfg.CurrencyId, int32(points));
+            AddScore(player, points);
+        };
+
         QuestStatus status = player->GetQuestStatus(questId);
         if (status == QUEST_STATUS_REWARDED)
-            AddScore(player, s_cfg.QuestPoints);
+            reward(s_cfg.QuestPoints);
         else if (status == QUEST_STATUS_NONE && quest->IsDaily() && player->IsDailyQuestDone(questId))
-            AddScore(player, s_cfg.DailyQuestPoints);
+            reward(s_cfg.DailyQuestPoints);
     }
 
     // L'addon s'envoie "AZPOW_REQ" (whisper addon à soi-même) pour demander les valeurs
