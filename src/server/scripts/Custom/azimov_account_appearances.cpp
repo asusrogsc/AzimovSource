@@ -124,8 +124,9 @@ namespace
         return AppearanceGroup(source) == AppearanceGroup(dest);
     }
 
-    // Objet équipé qui recevrait cette apparence (nullptr si aucun)
-    Item* FindTarget(Player* player, ItemTemplate const* source, uint8& slotOut);
+    // Objet équipé qui recevrait cette apparence (nullptr si aucun).
+    // forcedSlot : emplacement demandé par le joueur (main droite / main gauche), NULL_SLOT = automatique
+    Item* FindTarget(Player* player, ItemTemplate const* source, uint8& slotOut, uint8 forcedSlot = NULL_SLOT);
 
     // Emplacements équipés à essayer pour une apparence, dans l'ordre
     std::vector<uint8> CandidateSlots(ItemTemplate const* source)
@@ -143,8 +144,8 @@ namespace
             case INVTYPE_HANDS:     return { EQUIPMENT_SLOT_HANDS };
             case INVTYPE_CLOAK:     return { EQUIPMENT_SLOT_BACK };
             case INVTYPE_SHIELD:
-            case INVTYPE_HOLDABLE:
-            case INVTYPE_WEAPONOFFHAND: return { EQUIPMENT_SLOT_OFFHAND };
+            case INVTYPE_HOLDABLE:      return { EQUIPMENT_SLOT_OFFHAND };
+            case INVTYPE_WEAPONOFFHAND: return { EQUIPMENT_SLOT_OFFHAND, EQUIPMENT_SLOT_MAINHAND };
             case INVTYPE_RANGED:
             case INVTYPE_THROWN:
             case INVTYPE_RANGEDRIGHT:   return { EQUIPMENT_SLOT_RANGED };
@@ -152,10 +153,13 @@ namespace
         }
     }
 
-    Item* FindTarget(Player* player, ItemTemplate const* source, uint8& slotOut)
+    Item* FindTarget(Player* player, ItemTemplate const* source, uint8& slotOut, uint8 forcedSlot)
     {
         for (uint8 slot : CandidateSlots(source))
         {
+            if (forcedSlot != NULL_SLOT && slot != forcedSlot)
+                continue;
+
             Item* target = player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
             if (target && CanApply(target, source))
             {
@@ -248,7 +252,28 @@ namespace
         }
     }
 
-    void Apply(Player* player, uint32 sourceEntry)
+    // "<objet>" ou "<objet>:<emplacement>"
+    uint32 ParseSource(char const* text, uint8& forcedSlot)
+    {
+        char* end = nullptr;
+        uint32 entry = uint32(strtoul(text, &end, 10));
+        forcedSlot = NULL_SLOT;
+        if (end && *end == ':')
+        {
+            unsigned long slot = strtoul(end + 1, nullptr, 10);
+            if (slot == EQUIPMENT_SLOT_MAINHAND || slot == EQUIPMENT_SLOT_OFFHAND)
+                forcedSlot = uint8(slot);
+        }
+        return entry;
+    }
+
+    // suffixe ":<emplacement>" renvoyé au client avec le prix (0 = automatique)
+    std::string SlotSuffix(uint8 forcedSlot)
+    {
+        return ":" + std::to_string(forcedSlot == NULL_SLOT ? 0 : forcedSlot);
+    }
+
+    void Apply(Player* player, uint32 sourceEntry, uint8 forcedSlot)
     {
         ChatHandler chat(player->GetSession());
         uint32 accountId = player->GetSession()->GetAccountId();
@@ -263,7 +288,7 @@ namespace
             return;
 
         uint8 slot = 0;
-        if (Item* target = FindTarget(player, source, slot))
+        if (Item* target = FindTarget(player, source, slot, forcedSlot))
         {
             uint32 cost = target->GetSpecialPrice();
             if (!player->HasEnoughMoney(uint64(cost)))
@@ -280,20 +305,25 @@ namespace
             target->SetNotRefundable(player);
             target->ClearSoulboundTradeable(player);
             target->SetState(ITEM_CHANGED, player);
-            Send(player, "P:" + std::to_string(sourceEntry) + ":" + std::to_string(cost));
+            Send(player, "P:" + std::to_string(sourceEntry) + ":" + std::to_string(cost) + SlotSuffix(forcedSlot));
             return;
         }
 
-        chat.SendSysMessage("Aucun objet équipé compatible avec cette apparence (même emplacement ; une main et deux mains ne se mélangent pas).");
+        if (forcedSlot == EQUIPMENT_SLOT_OFFHAND)
+            chat.SendSysMessage("Aucune arme compatible en main gauche (une main et deux mains ne se mélangent pas).");
+        else if (forcedSlot == EQUIPMENT_SLOT_MAINHAND)
+            chat.SendSysMessage("Aucune arme compatible en main droite (une main et deux mains ne se mélangent pas).");
+        else
+            chat.SendSysMessage("Aucun objet équipé compatible avec cette apparence (même emplacement ; une main et deux mains ne se mélangent pas).");
     }
 
     // Prix en cuivre pour appliquer cette apparence sur l'objet équipé correspondant (-1 : aucun objet compatible)
-    void SendPrice(Player* player, uint32 sourceEntry)
+    void SendPrice(Player* player, uint32 sourceEntry, uint8 forcedSlot)
     {
         ItemTemplate const* source = sObjectMgr->GetItemTemplate(sourceEntry);
         uint8 slot = 0;
-        Item* target = source ? FindTarget(player, source, slot) : nullptr;
-        Send(player, "P:" + std::to_string(sourceEntry) + ":" + (target ? std::to_string(target->GetSpecialPrice()) : std::string("-1")));
+        Item* target = source ? FindTarget(player, source, slot, forcedSlot) : nullptr;
+        Send(player, "P:" + std::to_string(sourceEntry) + ":" + (target ? std::to_string(target->GetSpecialPrice()) : std::string("-1")) + SlotSuffix(forcedSlot));
     }
 
     void Reset(Player* player, uint8 slot)
@@ -345,9 +375,17 @@ public:
         if (msg == "AZAPP:L")
             SendList(player);
         else if (msg.compare(0, 8, "AZAPP:A:") == 0)
-            Apply(player, uint32(strtoul(msg.c_str() + 8, nullptr, 10)));
+        {
+            uint8 forcedSlot;
+            uint32 entry = ParseSource(msg.c_str() + 8, forcedSlot);
+            Apply(player, entry, forcedSlot);
+        }
         else if (msg.compare(0, 8, "AZAPP:P:") == 0)
-            SendPrice(player, uint32(strtoul(msg.c_str() + 8, nullptr, 10)));
+        {
+            uint8 forcedSlot;
+            uint32 entry = ParseSource(msg.c_str() + 8, forcedSlot);
+            SendPrice(player, entry, forcedSlot);
+        }
         else if (msg.compare(0, 8, "AZAPP:X:") == 0)
             Reset(player, uint8(strtoul(msg.c_str() + 8, nullptr, 10)));
     }
