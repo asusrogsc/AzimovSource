@@ -197,16 +197,45 @@ class spell_westfall_wake_harvest_golem : public SpellScript
     }
 };
 
+// Azimov : 79275 vise le « maître » de la Silhouette (cible 27), qui n'est pas toujours le joueur :
+// le crédit de « Mener la belle vie » (26228) n'arrivait alors jamais. On le donne directement
+// au joueur caché dans l'ancienne « maison » de Lou (véhicule 42500) et on le fait sortir.
+static constexpr uint32 QUEST_LIVIN_THE_LIFE = 26228;
+static constexpr uint32 NPC_LOUS_OLD_HOUSE   = 42500;
+
 class spell_westfall_quest_credit_jangolode_event : public SpellScript
 {
     void HandleScriptEffect(SpellEffIndex /*effIndex*/)
     {
-        GetHitUnit()->ExitVehicle();
+        if (Unit* target = GetHitUnit())
+            target->ExitVehicle();
+    }
+
+    void HandleAfterCast()
+    {
+        Unit* caster = GetCaster();
+        if (!caster)
+            return;
+
+        std::list<Player*> players;
+        caster->GetPlayerListInGrid(players, 60.0f);
+        for (Player* player : players)
+        {
+            Unit* house = player->GetVehicleBase();
+            if (!house || house->GetEntry() != NPC_LOUS_OLD_HOUSE)
+                continue;
+
+            if (player->GetQuestStatus(QUEST_LIVIN_THE_LIFE) == QUEST_STATUS_INCOMPLETE)
+                player->AreaExploredOrEventHappens(QUEST_LIVIN_THE_LIFE);
+
+            player->ExitVehicle();
+        }
     }
 
     void Register() override
     {
         OnEffectHitTarget.Register(&spell_westfall_quest_credit_jangolode_event::HandleScriptEffect, EFFECT_1, SPELL_EFFECT_SCRIPT_EFFECT);
+        AfterCast.Register(&spell_westfall_quest_credit_jangolode_event::HandleAfterCast);
     }
 };
 

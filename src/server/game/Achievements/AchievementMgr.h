@@ -281,6 +281,11 @@ class TC_GAME_API AchievementMgr
         void FailAchievementCriteria(AchievementCriteriaFailEvent failEvent, uint32 asset);
 
         uint32 GetAchievementPoints() const { return _achievementPoints; }
+
+        // Azimov : hauts faits liés au compte
+        CompletedAchievementMap const& GetCompletedAchievements() const { return m_completedAchievements; }
+        // ajoute un haut fait obtenu par un autre personnage du compte, sans annonce (titre compris, pas de courrier)
+        bool AddAccountAchievement(AchievementEntry const* achievement, time_t date);
     private:
         void SendAchievementEarned(AchievementEntry const* achievement) const;
         void SendCriteriaUpdate(AchievementCriteriaEntry const* entry, CriteriaProgress const* progress, uint32 timeElapsed, bool timedCompleted) const;

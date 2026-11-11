@@ -2332,6 +2332,7 @@ class TC_GAME_API Player : public Unit, public GridObject<Player>
         void UpdateAchievementCriteria(AchievementCriteriaTypes type, uint64 miscValue1 = 0, uint64 miscValue2 = 0, uint64 miscValue3 = 0, WorldObject* ref = nullptr, GameObject* go = nullptr);
         void StartAchievementCriteria(AchievementCriteriaStartEvent startEvent, uint32 entry, Milliseconds timeLost = Milliseconds::zero());
         void CompletedAchievement(AchievementEntry const* entry);
+        AchievementMgr<Player>* GetAchievementMgr() const { return m_achievementMgr.get(); } // Azimov : hauts faits liés au compte
 
         bool HasTitle(uint32 bitIndex) const;
         bool HasTitle(CharTitlesEntry const* title) const;

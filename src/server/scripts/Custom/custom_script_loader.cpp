@@ -42,6 +42,7 @@ void AddSC_azimov_account_toys();
 void AddSC_azimov_account_heirlooms();
 void AddSC_azimov_account_appearances();
 void AddSC_azimov_chauffeur_bike();
+void AddSC_azimov_account_achievements();
 
 void AddCustomScripts()
 {
@@ -67,4 +68,5 @@ void AddCustomScripts()
 	AddSC_azimov_account_heirlooms();
 	AddSC_azimov_account_appearances();
 	AddSC_azimov_chauffeur_bike();
+	AddSC_azimov_account_achievements();
 }

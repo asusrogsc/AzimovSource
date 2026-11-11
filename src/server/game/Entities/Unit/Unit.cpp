@@ -7987,6 +7987,11 @@ void Unit::UpdateMountCapability()
     AuraEffectList mounts = GetAuraEffectsByType(SPELL_AURA_MOUNTED);
     for (AuraEffect* aurEff : mounts)
     {
+        // Azimov : monture sans MountCapability (MiscValueB = 0, ex. Bécane avec chauffeur) : vitesse fixe
+        // donnée par le sort lui-même, rien à recalculer (sinon l'aura serait retirée à chaque changement de zone)
+        if (!aurEff->GetMiscValueB())
+            continue;
+
         aurEff->RecalculateAmount();
         if (!aurEff->GetAmount())
             aurEff->GetBase()->Remove();

@@ -3241,6 +3241,37 @@ char const* AchievementGlobalMgr::GetCriteriaTypeString(AchievementCriteriaTypes
     return "MISSING_TYPE";
 }
 
+// Azimov : hauts faits liés au compte
+template<class T>
+bool AchievementMgr<T>::AddAccountAchievement(AchievementEntry const* /*achievement*/, time_t /*date*/)
+{
+    return false;
+}
+
+template<>
+bool AchievementMgr<Player>::AddAccountAchievement(AchievementEntry const* achievement, time_t date)
+{
+    if (!achievement || (achievement->Flags & ACHIEVEMENT_FLAG_COUNTER) || HasAchieved(achievement->ID))
+        return false;
+
+    CompletedAchievementData& ca = m_completedAchievements[achievement->ID];
+    ca.date = date;
+    ca.changed = true;
+
+    _achievementPoints += achievement->Points;
+
+    // titre (même règle que CompletedAchievement) ; les objets ne sont pas renvoyés
+    if (AchievementReward const* reward = sAchievementMgr->GetAchievementReward(achievement))
+        if (uint32 titleId = reward->TitleID[achievement->ID == 1793 ? GetOwner()->GetByteValue(PLAYER_BYTES_3, PLAYER_BYTES_3_OFFSET_GENDER) : (GetOwner()->GetTeam() == ALLIANCE ? 0 : 1)])
+            if (CharTitlesEntry const* titleEntry = sCharTitlesStore.LookupEntry(titleId))
+                GetOwner()->SetTitle(titleEntry);
+
+    // méta-hauts faits et paliers de points : peuvent se terminer normalement
+    UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_COMPLETE_ACHIEVEMENT, achievement->ID, 0, 0, nullptr, GetOwner());
+    UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_EARN_ACHIEVEMENT_POINTS, achievement->Points, 0, 0, nullptr, GetOwner());
+    return true;
+}
+
 template class AchievementMgr<Guild>;
 template class AchievementMgr<Player>;
 
