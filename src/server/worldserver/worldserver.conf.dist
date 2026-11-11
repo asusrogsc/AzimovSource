@@ -788,8 +788,8 @@ CharactersPerAccount = 50
 #
 #    CharactersPerRealm
 #        Description: Limit number of characters per account on this realm.
-#        Range:       1-10
-#        Default:     10 - (Client limitation)
+#        Range:       1-50 (Azimov ; au-delà de 10, il faut l'écran de sélection modifié côté client)
+#        Default:     10
 
 CharactersPerRealm = 10
 
