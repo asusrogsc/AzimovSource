@@ -11261,7 +11261,9 @@ void Player::SetVisibleItemSlot(uint8 slot, Item* pItem)
     if (pItem)
     {
         SetUInt32Value(PLAYER_VISIBLE_ITEM_1_ENTRYID + (slot * 2), pItem->GetVisibleEntry());
-        SetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (slot * 2), 0, pItem->GetEnchantmentId(PERM_ENCHANTMENT_SLOT));
+        // Azimov : une illusion remplace l'effet visuel de l'enchantement permanent (les stats ne changent pas)
+        uint32 permVisual = pItem->GetAzimovIllusion() ? pItem->GetAzimovIllusion() : pItem->GetEnchantmentId(PERM_ENCHANTMENT_SLOT);
+        SetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (slot * 2), 0, permVisual);
         SetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (slot * 2), 1, pItem->GetEnchantmentId(TEMP_ENCHANTMENT_SLOT));
     }
     else

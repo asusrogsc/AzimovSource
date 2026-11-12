@@ -145,6 +145,9 @@ class TC_GAME_API Item : public Object
         void SetEnchantmentCharges(EnchantmentSlot slot, uint32 charges);
         void ClearEnchantment(EnchantmentSlot slot);
         uint32 GetEnchantmentId(EnchantmentSlot slot)       const { return GetUInt32Value(ITEM_FIELD_ENCHANTMENT_1_1 + slot*MAX_ENCHANTMENT_OFFSET + ENCHANTMENT_ID_OFFSET);}
+        // Azimov : illusion d'enchantement (effet visuel seulement, sans les stats) ; sauvegardée par le script azimov_account_illusions
+        uint32 GetAzimovIllusion() const { return _azimovIllusion; }
+        void SetAzimovIllusion(uint32 enchantId) { _azimovIllusion = enchantId; }
         uint32 GetEnchantmentDuration(EnchantmentSlot slot) const { return GetUInt32Value(ITEM_FIELD_ENCHANTMENT_1_1 + slot*MAX_ENCHANTMENT_OFFSET + ENCHANTMENT_DURATION_OFFSET);}
         uint32 GetEnchantmentCharges(EnchantmentSlot slot)  const { return GetUInt32Value(ITEM_FIELD_ENCHANTMENT_1_1 + slot*MAX_ENCHANTMENT_OFFSET + ENCHANTMENT_CHARGES_OFFSET);}
 
@@ -236,6 +239,7 @@ class TC_GAME_API Item : public Object
         bool mb_in_trade;                                   // true if item is currently in trade-window
         ObjectGuid::LowType m_refundRecipient;
         uint32 m_paidMoney;
+        uint32 _azimovIllusion = 0;
         uint32 m_paidExtendedCost;
         GuidSet allowedGUIDs;
         ItemRandomEnchantmentId m_randomEnchantment;

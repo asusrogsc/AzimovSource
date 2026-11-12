@@ -24,6 +24,7 @@
 #include "Player.h"
 #include "SharedDefines.h"
 #include "WorldSession.h"
+#include <cstring>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -339,6 +340,178 @@ namespace
         player->SetVisibleItemSlot(slot, target);
         target->SetState(ITEM_CHANGED, player);
     }
+
+    // ---------------------------------------------------------------
+    // Tenues enregistrées (20 par personnage) : table characters `character_outfits`
+    //   "OL" liste -> "OR", "OO:<idx>|<nom>|<slot>:<objet>,...", "OE"
+    //   "OS:<idx>:<nom>" enregistrer l'apparence actuelle   "OD:<idx>" supprimer
+    //   "OP:<idx>" coût -> "OC:<idx>:<coût>:<pièces>"       "OA:<idx>" appliquer (coût = somme des transmogrifications)
+    // ---------------------------------------------------------------
+    constexpr uint8 MAX_OUTFITS = 20;
+    uint8 const OutfitSlots[] = { EQUIPMENT_SLOT_HEAD, EQUIPMENT_SLOT_SHOULDERS, EQUIPMENT_SLOT_BACK, EQUIPMENT_SLOT_CHEST,
+        EQUIPMENT_SLOT_WRISTS, EQUIPMENT_SLOT_HANDS, EQUIPMENT_SLOT_WAIST, EQUIPMENT_SLOT_LEGS, EQUIPMENT_SLOT_FEET,
+        EQUIPMENT_SLOT_MAINHAND, EQUIPMENT_SLOT_OFFHAND, EQUIPMENT_SLOT_RANGED };
+
+    // apparence affichée par un objet équipé : sa transmogrification, sinon lui-même
+    uint32 ShownEntry(Item* item)
+    {
+        uint32 transmog = item->GetEnchantmentId(TRANSMOGRIFY_ENCHANTMENT_SLOT);
+        return transmog ? transmog : item->GetEntry();
+    }
+
+    std::string LoadOutfit(Player* player, uint8 idx)
+    {
+        if (QueryResult result = CharacterDatabase.PQuery("SELECT slots FROM character_outfits WHERE guid = %u AND idx = %u",
+            player->GetGUID().GetCounter(), idx))
+            return (*result)[0].GetString();
+        return "";
+    }
+
+    struct OutfitChange
+    {
+        uint8 slot;
+        Item* target;
+        uint32 entry; // 0 = retirer la transmogrification (l'objet reprend sa propre apparence)
+    };
+
+    // changements nécessaires pour porter la tenue (pièces manquantes ou incompatibles ignorées)
+    std::vector<OutfitChange> OutfitChanges(Player* player, std::string const& slots, uint32& cost)
+    {
+        std::vector<OutfitChange> changes;
+        cost = 0;
+        std::set<uint32> const& owned = AccountAppearances[player->GetSession()->GetAccountId()];
+        char const* p = slots.c_str();
+        while (*p)
+        {
+            char* end = nullptr;
+            uint32 slot = uint32(strtoul(p, &end, 10));
+            if (!end || *end != ':')
+                break;
+            uint32 entry = uint32(strtoul(end + 1, &end, 10));
+            p = (end && *end == ',') ? end + 1 : (end ? end : p + strlen(p));
+
+            if (slot >= EQUIPMENT_SLOT_END)
+                continue;
+            Item* target = player->GetItemByPos(INVENTORY_SLOT_BAG_0, uint8(slot));
+            if (!target || ShownEntry(target) == entry)
+                continue;
+
+            if (entry == target->GetEntry())
+            {
+                changes.push_back({ uint8(slot), target, 0 }); // gratuit, comme « Retirer l'apparence »
+                continue;
+            }
+            if (!owned.count(entry) || !CanApply(target, sObjectMgr->GetItemTemplate(entry)))
+                continue;
+
+            cost += target->GetSpecialPrice();
+            changes.push_back({ uint8(slot), target, entry });
+        }
+        return changes;
+    }
+
+    void SendOutfits(Player* player)
+    {
+        Send(player, "OR");
+        if (QueryResult result = CharacterDatabase.PQuery("SELECT idx, name, slots FROM character_outfits WHERE guid = %u ORDER BY idx",
+            player->GetGUID().GetCounter()))
+        {
+            do
+            {
+                Field* fields = result->Fetch();
+                Send(player, "OO:" + std::to_string(fields[0].GetUInt8()) + "|" + fields[1].GetString() + "|" + fields[2].GetString());
+            } while (result->NextRow());
+        }
+        Send(player, "OE");
+    }
+
+    void SaveOutfit(Player* player, uint8 idx, std::string name)
+    {
+        if (idx >= MAX_OUTFITS)
+            return;
+
+        // nom : 48 octets, sans séparateurs ni codes de couleur
+        for (char& c : name)
+            if (c == '|' || c == ':' || c == ',' || c == '\'' || c == '"' || c == '\\')
+                c = ' ';
+        if (name.size() > 48)
+        {
+            // coupe sans casser un caractère UTF-8 (lettres accentuées)
+            name.resize(48);
+            while (!name.empty() && (uint8(name.back()) & 0xC0) == 0x80)
+                name.pop_back();
+            if (!name.empty() && (uint8(name.back()) & 0xC0) == 0xC0)
+                name.pop_back();
+        }
+        if (name.empty())
+            name = "Tenue " + std::to_string(idx + 1);
+
+        std::string slots;
+        for (uint8 slot : OutfitSlots)
+            if (Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot))
+            {
+                if (!slots.empty())
+                    slots += ',';
+                slots += std::to_string(slot) + ":" + std::to_string(ShownEntry(item));
+            }
+
+        CharacterDatabase.EscapeString(name);
+        CharacterDatabase.PExecute("REPLACE INTO character_outfits (guid, idx, name, slots) VALUES (%u, %u, '%s', '%s')",
+            player->GetGUID().GetCounter(), idx, name.c_str(), slots.c_str());
+        ChatHandler(player->GetSession()).PSendSysMessage("|cffffd100[Collections]|r Tenue « %s » enregistrée.", name.c_str());
+        SendOutfits(player);
+    }
+
+    void SendOutfitPrice(Player* player, uint8 idx)
+    {
+        uint32 cost = 0;
+        std::vector<OutfitChange> changes = OutfitChanges(player, LoadOutfit(player, idx), cost);
+        Send(player, "OC:" + std::to_string(idx) + ":" + std::to_string(cost) + ":" + std::to_string(changes.size()));
+    }
+
+    void ApplyOutfit(Player* player, uint8 idx)
+    {
+        ChatHandler chat(player->GetSession());
+        std::string slots = LoadOutfit(player, idx);
+        if (slots.empty())
+            return;
+
+        uint32 cost = 0;
+        std::vector<OutfitChange> changes = OutfitChanges(player, slots, cost);
+        if (changes.empty())
+        {
+            chat.SendSysMessage("|cffffd100[Collections]|r Vous portez déjà cette tenue (ou aucune pièce compatible n'est équipée).");
+            return;
+        }
+        if (!player->HasEnoughMoney(uint64(cost)))
+        {
+            player->SendBuyError(BUY_ERR_NOT_ENOUGHT_MONEY, nullptr, 0, 0);
+            return;
+        }
+        player->ModifyMoney(-int64(cost));
+
+        for (OutfitChange const& change : changes)
+        {
+            if (change.entry)
+            {
+                change.target->SetEnchantment(TRANSMOGRIFY_ENCHANTMENT_SLOT, change.entry, 0, 0);
+                change.target->SetNotRefundable(player);
+                change.target->ClearSoulboundTradeable(player);
+            }
+            else
+                change.target->ClearEnchantment(TRANSMOGRIFY_ENCHANTMENT_SLOT);
+            player->SetVisibleItemSlot(change.slot, change.target);
+            change.target->SetState(ITEM_CHANGED, player);
+        }
+        chat.PSendSysMessage("|cffffd100[Collections]|r Tenue appliquée : %u pièce(s).", uint32(changes.size()));
+        SendOutfitPrice(player, idx);
+    }
+
+    void DeleteOutfit(Player* player, uint8 idx)
+    {
+        CharacterDatabase.PExecute("DELETE FROM character_outfits WHERE guid = %u AND idx = %u", player->GetGUID().GetCounter(), idx);
+        SendOutfits(player);
+    }
 }
 
 class azimov_account_appearances : public PlayerScript
@@ -388,6 +561,20 @@ public:
         }
         else if (msg.compare(0, 8, "AZAPP:X:") == 0)
             Reset(player, uint8(strtoul(msg.c_str() + 8, nullptr, 10)));
+        else if (msg == "AZAPP:OL")
+            SendOutfits(player);
+        else if (msg.compare(0, 9, "AZAPP:OS:") == 0)
+        {
+            char* end = nullptr;
+            uint8 idx = uint8(strtoul(msg.c_str() + 9, &end, 10));
+            SaveOutfit(player, idx, (end && *end == ':') ? std::string(end + 1) : std::string());
+        }
+        else if (msg.compare(0, 9, "AZAPP:OA:") == 0)
+            ApplyOutfit(player, uint8(strtoul(msg.c_str() + 9, nullptr, 10)));
+        else if (msg.compare(0, 9, "AZAPP:OP:") == 0)
+            SendOutfitPrice(player, uint8(strtoul(msg.c_str() + 9, nullptr, 10)));
+        else if (msg.compare(0, 9, "AZAPP:OD:") == 0)
+            DeleteOutfit(player, uint8(strtoul(msg.c_str() + 9, nullptr, 10)));
     }
 };
 

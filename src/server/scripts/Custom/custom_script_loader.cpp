@@ -43,6 +43,9 @@ void AddSC_azimov_account_heirlooms();
 void AddSC_azimov_account_appearances();
 void AddSC_azimov_chauffeur_bike();
 void AddSC_azimov_account_achievements();
+void AddSC_azimov_account_illusions();
+void AddSC_azimov_account_reputations();
+void AddSC_azimov_account_bank();
 
 void AddCustomScripts()
 {
@@ -69,4 +72,7 @@ void AddCustomScripts()
 	AddSC_azimov_account_appearances();
 	AddSC_azimov_chauffeur_bike();
 	AddSC_azimov_account_achievements();
+	AddSC_azimov_account_illusions();
+	AddSC_azimov_account_reputations();
+	AddSC_azimov_account_bank();
 }
