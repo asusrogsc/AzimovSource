@@ -10,8 +10,13 @@
 #include "ScriptMgr.h"
 #include "Chat.h"
 #include "Creature.h"
+#include "GameObject.h"
+#include "GameObjectAI.h"
 #include "GameTime.h"
+#include "MotionMaster.h"
 #include "ObjectAccessor.h"
+#include "ScriptedCreature.h"
+#include "SpellScript.h"
 #include "ObjectMgr.h"
 #include "Player.h"
 #include "QuestDef.h"
@@ -63,10 +68,21 @@ namespace
         }
     }
 
+    // 26512 Tuning the Gnomecorder : tester le gnomotophone au cimetière de Comté-du-Lac (carte [32, 39])
+    Position const PosGraveyard = { -9182.3f, -2301.7f, 0.0f, 0.0f };
+
     void Tick(Player* p)
     {
         if (!p->IsInWorld() || p->GetMapId() != 0 || p->IsBeingTeleported())
             return;
+
+        if (p->GetQuestStatus(26512) == QUEST_STATUS_INCOMPLETE && p->GetExactDist2d(&PosGraveyard) < 30.0f)
+        {
+            ChatHandler(p->GetSession()).PSendSysMessage("|cffffd100Le gnomotophone grésille et crépite... Magistrat Solomon : « Je vous reçois cinq sur cinq ! »|r");
+            p->AreaExploredOrEventHappens(26512);
+            if (p->GetQuestStatus(26512) == QUEST_STATUS_INCOMPLETE)
+                p->CompleteQuest(26512);
+        }
 
         auto it = s_boat.find(p->GetGUID().GetCounter());
         QuestStatus qs = p->GetQuestStatus(QUEST_ITS_NEVER_OVER);
@@ -182,8 +198,120 @@ public:
     }
 };
 
+// Prisoners of War (26646) : le levier à chaînes (avec la Clé du levier rochenoire) libère les prisonniers
+class go_azimov_chain_lever : public GameObjectScript
+{
+public:
+    go_azimov_chain_lever() : GameObjectScript("go_azimov_chain_lever") { }
+
+    struct go_azimov_chain_leverAI : public GameObjectAI
+    {
+        go_azimov_chain_leverAI(GameObject* go) : GameObjectAI(go) { }
+
+        bool GossipHello(Player* player) override
+        {
+            if (player && player->GetQuestStatus(26646) == QUEST_STATUS_INCOMPLETE)
+            {
+                player->KilledMonsterCredit(43574);
+                ChatHandler(player->GetSession()).PSendSysMessage("|cffffd100Les chaînes cèdent dans un grand fracas : la porte de la cage des prisonniers s'ouvre ! Retournez voir Keeshan.|r");
+            }
+            return false;   // le levier s'actionne normalement
+        }
+    };
+
+    GameObjectAI* GetAI(GameObject* go) const override
+    {
+        return new go_azimov_chain_leverAI(go);
+    }
+};
+
+// ---------------------------------------------------------------- Orbe de contrôle d'ettin (80702)
+// « He Who Controls the Ettins » / « Saving Foreman Oslow » : l'orbe soumet un ettin du canyon,
+// l'ettin soumis (43197) suit le joueur ; près du contremaître Oslow (341) il soulève les rochers.
+enum EttinControl : uint32
+{
+    NPC_CONTROLLED_ETTIN = 43197,
+    NPC_FOREMAN_OSLOW    = 341
+};
+
+class spell_azimov_ettin_control : public SpellScript
+{
+    void HandleScript(SpellEffIndex /*eff*/)
+    {
+        Player* player = GetCaster() ? GetCaster()->ToPlayer() : nullptr;
+        Creature* ettin = GetHitCreature();
+        if (!player || !ettin || !ettin->IsAlive())
+            return;
+
+        Position pos = ettin->GetPosition();
+        ettin->DespawnOrUnsummon(0, 30s);
+        if (TempSummon* tamed = player->SummonCreature(NPC_CONTROLLED_ETTIN, pos, TEMPSUMMON_TIMED_DESPAWN, 300000, 0, player->GetGUID()))
+        {
+            tamed->SetFaction(player->GetFaction());
+            tamed->SetReactState(REACT_PASSIVE);
+            tamed->GetMotionMaster()->MoveFollow(player, 3.0f, float(M_PI));
+            tamed->Say("GRAAAH... Ettin obéir...", LANG_UNIVERSAL);
+        }
+        player->KilledMonsterCredit(NPC_CONTROLLED_ETTIN);
+    }
+
+    void PreventSummon(SpellEffIndex effIndex)
+    {
+        PreventHitDefaultEffect(effIndex);   // l'invocation est faite à la main ci-dessus (personnelle, qui suit)
+    }
+
+    void Register() override
+    {
+        OnEffectHitTarget.Register(&spell_azimov_ettin_control::HandleScript, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
+        OnEffectHit.Register(&spell_azimov_ettin_control::PreventSummon, EFFECT_1, SPELL_EFFECT_SUMMON);
+    }
+};
+
+struct npc_azimov_controlled_ettin : public ScriptedAI
+{
+    npc_azimov_controlled_ettin(Creature* creature) : ScriptedAI(creature), _timer(1000), _done(false) { }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (_done || _timer > diff)
+        {
+            if (!_done)
+                _timer -= diff;
+            return;
+        }
+        _timer = 1000;
+
+        TempSummon* self = me->ToTempSummon();
+        Unit* owner = self ? self->GetSummoner() : nullptr;
+        Player* player = owner ? owner->ToPlayer() : nullptr;
+        if (!player)
+        {
+            me->DespawnOrUnsummon();
+            return;
+        }
+        if (Creature* oslow = me->FindNearestCreature(NPC_FOREMAN_OSLOW, 15.0f))
+        {
+            _done = true;
+            me->GetMotionMaster()->Clear();
+            me->SetFacingToObject(oslow);
+            me->HandleEmoteCommand(EMOTE_ONESHOT_ATTACK2HTIGHT);
+            me->Say("RAAAH ! Ettin soulever cailloux !", LANG_UNIVERSAL);
+            player->KilledMonsterCredit(NPC_FOREMAN_OSLOW);
+            oslow->Say("Je suis libre ! Merci, merci mille fois !", LANG_UNIVERSAL);
+            me->DespawnOrUnsummon(5s);
+        }
+    }
+
+private:
+    uint32 _timer;
+    bool _done;
+};
+
 void AddSC_azimov_quetes_carmines()
 {
+    RegisterSpellScript(spell_azimov_ettin_control);
+    RegisterCreatureAI(npc_azimov_controlled_ettin);
+    new go_azimov_chain_lever();
     new azimov_carmines_world();
     new azimov_carmines_player();
 }

@@ -11,6 +11,8 @@
  *   mode 2 : fin `delay` s après avoir pris la quête (en vie, dans la zone si `zone` est rempli)
  *   mode 3 : chaque monstre tué dans la zone `zone` (0 = zone de la quête) fait progresser
  *   mode 4 : chaque PNJ `npc` tué fait progresser
+ *   mode 5 : objectif « aller à un endroit » rempli en arrivant à moins de `radius` m du point (map, x, y)
+ *            (comme une zone de déclenchement : les autres objectifs de la quête restent à faire)
  * Ce qui est donné quand la condition est remplie :
  *   credit > 0 : crédit du PNJ `credit` (credit < 0 : objet du monde -credit)
  *   item > 0   : l'objet de quête `item` (mode 3/4 : 1 par mort, avec `chance` %)
@@ -45,7 +47,8 @@ namespace
         AZQF_NEAR_NPC   = 1,
         AZQF_DELAY      = 2,
         AZQF_ZONE_KILL  = 3,
-        AZQF_NPC_KILL   = 4
+        AZQF_NPC_KILL   = 4,
+        AZQF_POINT      = 5
     };
 
     struct AzQuestFix
@@ -59,6 +62,8 @@ namespace
         int32 credit = 0;
         uint32 item = 0;
         uint8 chance = 100;
+        uint32 map = 0;
+        float x = 0.f, y = 0.f;
     };
 
     std::vector<AzQuestFix> s_fixes;                       // toutes les lignes
@@ -224,6 +229,13 @@ namespace
         time_t now = GameTime::GetGameTime();
         for (AzQuestFix const& f : s_fixes)
         {
+            if (f.mode == AZQF_POINT)
+            {
+                if (player->GetMapId() == f.map && player->GetExactDist2d(f.x, f.y) < f.radius
+                    && player->GetQuestStatus(f.quest) == QUEST_STATUS_INCOMPLETE)
+                    player->AreaExploredOrEventHappens(f.quest);
+                continue;
+            }
             if (f.mode > AZQF_DELAY)
                 continue;
             if (player->GetQuestStatus(f.quest) != QUEST_STATUS_INCOMPLETE)
@@ -284,7 +296,7 @@ public:
         s_fixes.clear();
         s_byQuest.clear();
 
-        QueryResult res = WorldDatabase.Query("SELECT quest, mode, npc, radius, delay, zone, credit, item, chance FROM azimov_quest_fix");
+        QueryResult res = WorldDatabase.Query("SELECT quest, mode, npc, radius, delay, zone, credit, item, chance, map, x, y FROM azimov_quest_fix");
         if (!res)
         {
             TC_LOG_INFO("server.loading", ">> azimov_quest_fix : aucune ligne (table vide ou absente)");
@@ -303,7 +315,10 @@ public:
             f.credit = fl[6].GetInt32();
             f.item   = fl[7].GetUInt32();
             f.chance = fl[8].GetUInt8();
-            if (!sObjectMgr->GetQuestTemplate(f.quest) || f.mode > AZQF_NPC_KILL)
+            f.map    = fl[9].GetUInt32();
+            f.x      = fl[10].GetFloat();
+            f.y      = fl[11].GetFloat();
+            if (!sObjectMgr->GetQuestTemplate(f.quest) || f.mode > AZQF_POINT)
             {
                 TC_LOG_ERROR("sql.sql", "azimov_quest_fix : quête %u ou mode %u invalide, ligne ignorée", f.quest, f.mode);
                 continue;
