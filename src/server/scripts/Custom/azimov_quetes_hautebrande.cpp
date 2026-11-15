@@ -508,12 +508,12 @@ namespace
         if (!p->IsInWorld() || p->GetMapId() != 0 || p->IsBeingTeleported())
             return;
 
-        bool near = p->GetExactDist2d(&PosShore) < 300.0f || p->GetExactDist2d(&PosIslePlayer) < 300.0f
+        bool proche = p->GetExactDist2d(&PosShore) < 300.0f || p->GetExactDist2d(&PosIslePlayer) < 300.0f
             || p->GetExactDist2d(&PosStillwater) < 200.0f || p->GetExactDist2d(&PosCromush) < 200.0f
             || p->GetExactDist2d(&PosVoggah) < 200.0f;
 
         auto it = s_states.find(p->GetGUID().GetCounter());
-        if (!near)
+        if (!proche)
         {
             if (it != s_states.end())
             {

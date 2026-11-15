@@ -49,6 +49,7 @@ void AddSC_azimov_account_bank();
 void AddSC_azimov_quest_fix();
 void AddSC_azimov_quetes_gnomes();
 void AddSC_azimov_quetes_hautebrande();
+void AddSC_azimov_pnj_quetes();
 
 void AddCustomScripts()
 {
@@ -81,4 +82,5 @@ void AddCustomScripts()
 	AddSC_azimov_quest_fix();
 	AddSC_azimov_quetes_gnomes();
 	AddSC_azimov_quetes_hautebrande();
+	AddSC_azimov_pnj_quetes();
 }
