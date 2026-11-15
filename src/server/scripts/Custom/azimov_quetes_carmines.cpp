@@ -225,7 +225,7 @@ public:
     }
 };
 
-// ---------------------------------------------------------------- Orbe de contrôle d'ettin (80702)
+// ---------------------------------------------------------------- Orbe de contrôle d'ettin (objet 58895, sort 80704)
 // « He Who Controls the Ettins » / « Saving Foreman Oslow » : l'orbe soumet un ettin du canyon,
 // l'ettin soumis (43197) suit le joueur ; près du contremaître Oslow (341) il soulève les rochers.
 enum EttinControl : uint32
@@ -236,11 +236,32 @@ enum EttinControl : uint32
 
 class spell_azimov_ettin_control : public SpellScript
 {
+    // L'orbe (objet 58895) lance 80704 sur soi : on prend l'ettin du canyon ciblé par le joueur
+    Creature* FindEttin(Player* player)
+    {
+        if (Unit* sel = player->GetSelectedUnit())
+            if (Creature* c = sel->ToCreature())
+                if (c->IsAlive() && !c->IsSummon() && player->IsWithinDistInMap(c, 20.0f)
+                    && c->GetCreatureTemplate()->Name.find("Ettin") != std::string::npos)
+                    return c;
+        return nullptr;
+    }
+
+    SpellCastResult CheckCast()
+    {
+        Player* player = GetCaster() ? GetCaster()->ToPlayer() : nullptr;
+        if (!player || !FindEttin(player))
+            return SPELL_FAILED_BAD_TARGETS;
+        return SPELL_CAST_OK;
+    }
+
     void HandleScript(SpellEffIndex /*eff*/)
     {
         Player* player = GetCaster() ? GetCaster()->ToPlayer() : nullptr;
-        Creature* ettin = GetHitCreature();
-        if (!player || !ettin || !ettin->IsAlive())
+        if (!player)
+            return;
+        Creature* ettin = FindEttin(player);
+        if (!ettin)
             return;
 
         Position pos = ettin->GetPosition();
@@ -255,15 +276,10 @@ class spell_azimov_ettin_control : public SpellScript
         player->KilledMonsterCredit(NPC_CONTROLLED_ETTIN);
     }
 
-    void PreventSummon(SpellEffIndex effIndex)
-    {
-        PreventHitDefaultEffect(effIndex);   // l'invocation est faite à la main ci-dessus (personnelle, qui suit)
-    }
-
     void Register() override
     {
-        OnEffectHitTarget.Register(&spell_azimov_ettin_control::HandleScript, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
-        OnEffectHit.Register(&spell_azimov_ettin_control::PreventSummon, EFFECT_1, SPELL_EFFECT_SUMMON);
+        OnCheckCast.Register(&spell_azimov_ettin_control::CheckCast);
+        OnEffectHit.Register(&spell_azimov_ettin_control::HandleScript, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
     }
 };
 
