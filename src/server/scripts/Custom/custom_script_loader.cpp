@@ -46,6 +46,8 @@ void AddSC_azimov_account_achievements();
 void AddSC_azimov_account_illusions();
 void AddSC_azimov_account_reputations();
 void AddSC_azimov_account_bank();
+void AddSC_azimov_quest_fix();
+void AddSC_azimov_quetes_gnomes();
 
 void AddCustomScripts()
 {
@@ -75,4 +77,6 @@ void AddCustomScripts()
 	AddSC_azimov_account_illusions();
 	AddSC_azimov_account_reputations();
 	AddSC_azimov_account_bank();
+	AddSC_azimov_quest_fix();
+	AddSC_azimov_quetes_gnomes();
 }

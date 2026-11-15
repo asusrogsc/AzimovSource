@@ -18,6 +18,8 @@
 #include "Player.h"
 #include "Chat.h"
 #include "Map.h"
+#include <vector>
+#include <cmath>
 #include "Containers.h"
 #include "ScriptMgr.h"
 #include "SpellScript.h"
@@ -1639,7 +1641,172 @@ class spell_westfall_sniper_fire : public SpellScript
 // On valide l'objectif quand le joueur arrive au cœur de Ruisselune (point d'intérêt de la quête).
 static constexpr uint32 QUEST_DAWNING_OF_A_NEW_DAY = 26297;
 static Position const MoonbrookGatheringPos = { -11013.0f, 1475.0f, 47.0f, 0.0f };
-static constexpr float MOONBROOK_GATHERING_RADIUS = 45.0f;
+static constexpr float MOONBROOK_GATHERING_RADIUS = 80.0f;
+static constexpr uint32 AREA_MOONBROOK = 20;
+
+// Azimov : « Le soulèvement de la Confrérie » (26322) : scène de la Colline des Sentinelles (étage de l'auberge).
+// Aucun script ni texte dans la base : la scène est jouée ici, dialogues écrits en français dans l'esprit
+// de l'originale. Elle démarre quand un joueur qui a la quête monte à l'étage où se tiennent Gryan et Horatio.
+static constexpr uint32 QUEST_RISE_OF_THE_BROTHERHOOD = 26322;
+static constexpr uint32 NPC_RISE_GRYAN        = 234;
+static constexpr uint32 NPC_RISE_HORATIO      = 42308;
+static constexpr uint32 NPC_RISE_DANUVIN      = 821;
+static constexpr uint32 NPC_RISE_GALIAAN      = 878;
+static constexpr uint32 NPC_RISE_VANESSA      = 42371;
+static constexpr uint32 NPC_RISE_BLACKGUARD   = 42769;
+static constexpr uint32 NPC_RISE_BANNER       = 42683;
+static Position const RiseCenterPos   = { -10508.5f, 1044.5f, 60.52f, 0.0f };
+static Position const RiseVanessaFrom = { -10499.5f, 1044.0f, 60.61f, 3.14f };
+static Position const RiseVanessaTo   = { -10505.6f, 1045.0f, 60.61f, 3.10f };
+static Position const RiseBannerPos   = { -10507.0f, 1043.2f, 60.61f, 0.0f };
+static Position const RiseBlackguardPos[] =
+{
+    { -10503.2f, 1048.4f, 60.61f, 3.9f },
+    { -10513.4f, 1043.2f, 60.61f, 0.2f },
+    { -10505.0f, 1038.3f, 60.61f, 2.0f },
+    { -10512.2f, 1049.2f, 60.61f, 5.3f },
+};
+
+struct RiseOfTheBrotherhoodEvent
+{
+    bool Active = false;
+    uint8 Step = 0;
+    int32 Timer = 0;
+    std::string HeroName;
+    ObjectGuid Gryan, Horatio, Danuvin, Galiaan, Vanessa, Banner;
+    std::vector<ObjectGuid> Blackguards;
+
+    Creature* Get(Map* map, ObjectGuid const& guid) { return guid.IsEmpty() ? nullptr : map->GetCreature(guid); }
+    void Say(Map* map, ObjectGuid const& guid, std::string const& text) { if (Creature* c = Get(map, guid)) c->Say(text, LANG_UNIVERSAL); }
+    void Yell(Map* map, ObjectGuid const& guid, std::string const& text) { if (Creature* c = Get(map, guid)) c->Yell(text, LANG_UNIVERSAL); }
+    void Stand(Map* map, ObjectGuid const& guid, uint8 state) { if (Creature* c = Get(map, guid)) c->SetStandState(state); }
+
+    template <typename F>
+    void ForNearbyPlayers(Map* map, F&& func)
+    {
+        for (auto const& ref : map->GetPlayers())
+            if (Player* player = ref.GetSource())
+                if (player->IsInWorld() && player->GetExactDist(&RiseCenterPos) < 25.0f)
+                    func(player);
+    }
+
+    void Start(Player* hero)
+    {
+        Active = true;
+        Step = 0;
+        Timer = 1000;
+        HeroName = hero->GetName();
+        Blackguards.clear();
+        Banner.Clear();
+        Vanessa.Clear();
+        auto find = [hero](uint32 entry) { Creature* c = hero->FindNearestCreature(entry, 30.0f); return c ? c->GetGUID() : ObjectGuid::Empty; };
+        Gryan = find(NPC_RISE_GRYAN);
+        Horatio = find(NPC_RISE_HORATIO);
+        Danuvin = find(NPC_RISE_DANUVIN);
+        Galiaan = find(NPC_RISE_GALIAAN);
+    }
+
+    // une étape ; renvoie le délai avant la suivante (0 = fin)
+    int32 DoStep(Map* map)
+    {
+        Creature* gryan = Get(map, Gryan);
+        switch (Step++)
+        {
+            case 0:
+                Say(map, Gryan, "Lieutenant, " + HeroName + " m'a tout raconté. VanCleef avait une fille... et elle aurait tout vu, cette nuit-là.");
+                return 6000;
+            case 1:
+                Say(map, Horatio, "Elle est peut-être plus près que vous ne le croyez, maréchal. Les sans-abri parlent d'une femme qui leur promet une « aube nouvelle ».");
+                return 7000;
+            case 2:
+                Say(map, Danuvin, "Maréchal ! Les gnolls se replient... et les sentinelles du chemin ne répondent plus !");
+                return 4000;
+            case 3:
+                if (gryan)
+                    for (Position const& pos : RiseBlackguardPos)
+                        if (TempSummon* guard = gryan->SummonCreature(NPC_RISE_BLACKGUARD, pos, TEMPSUMMON_TIMED_DESPAWN, 60000))
+                        {
+                            guard->SetFaction(35);
+                            guard->SetReactState(REACT_PASSIVE);
+                            if (Blackguards.empty())
+                                guard->TextEmote("Des Gardes noirs défias jaillissent des ombres !");
+                            Blackguards.push_back(guard->GetGUID());
+                        }
+                Say(map, Gryan, "EN GARDE !");
+                return 3000;
+            case 4:
+                // les gardes de la colline tombent, assommés
+                Stand(map, Danuvin, UNIT_STAND_STATE_DEAD);
+                Stand(map, Galiaan, UNIT_STAND_STATE_DEAD);
+                Stand(map, Horatio, UNIT_STAND_STATE_KNEEL);
+                if (gryan)
+                    if (TempSummon* vanessa = gryan->SummonCreature(NPC_RISE_VANESSA, RiseVanessaFrom, TEMPSUMMON_TIMED_DESPAWN, 60000))
+                    {
+                        vanessa->SetReactState(REACT_PASSIVE);
+                        vanessa->SetWalk(true);
+                        vanessa->GetMotionMaster()->MovePoint(1, RiseVanessaTo);
+                        Vanessa = vanessa->GetGUID();
+                    }
+                return 5000;
+            case 5:
+                Yell(map, Vanessa, "Bonsoir, maréchal Chope-Fer. Vous me cherchiez ? Je suis Vanessa VanCleef.");
+                return 6000;
+            case 6:
+                Say(map, Vanessa, "Vous avez laissé mon père mourir et la Marche de l'Ouest pourrir. Ses enfants oubliés sont devenus les miens.");
+                return 7000;
+            case 7:
+                Say(map, Vanessa, "Non, je ne suis pas venue vous tuer. Pas encore. Je veux que vous voyiez ce que nous ferons de Hurlevent.");
+                return 6000;
+            case 8:
+                if (Creature* vanessa = Get(map, Vanessa))
+                    vanessa->TextEmote("Vanessa VanCleef vous injecte un poison paralysant !", nullptr, true);
+                ForNearbyPlayers(map, [](Player* player) { player->SetStandState(UNIT_STAND_STATE_DEAD); });
+                Stand(map, Gryan, UNIT_STAND_STATE_KNEEL);
+                return 4000;
+            case 9:
+                Yell(map, Vanessa, "Frères et sœurs de la Marche de l'Ouest, levez-vous ! Ce soir, la Confrérie défias renaît !");
+                if (gryan)
+                    if (TempSummon* banner = gryan->SummonCreature(NPC_RISE_BANNER, RiseBannerPos, TEMPSUMMON_TIMED_DESPAWN, 120000))
+                        Banner = banner->GetGUID();
+                return 5000;
+            case 10:
+                // Vanessa et ses Gardes noirs disparaissent dans l'ombre
+                if (Creature* vanessa = Get(map, Vanessa))
+                    vanessa->DespawnOrUnsummon();
+                for (ObjectGuid const& guid : Blackguards)
+                    if (Creature* guard = Get(map, guid))
+                        guard->DespawnOrUnsummon();
+                return 4000;
+            case 11:
+                ForNearbyPlayers(map, [](Player* player)
+                {
+                    player->SetStandState(UNIT_STAND_STATE_STAND);
+                    if (player->GetQuestStatus(QUEST_RISE_OF_THE_BROTHERHOOD) == QUEST_STATUS_INCOMPLETE)
+                        player->AreaExploredOrEventHappens(QUEST_RISE_OF_THE_BROTHERHOOD);
+                });
+                Stand(map, Danuvin, UNIT_STAND_STATE_STAND);
+                Stand(map, Galiaan, UNIT_STAND_STATE_STAND);
+                Stand(map, Horatio, UNIT_STAND_STATE_STAND);
+                Stand(map, Gryan, UNIT_STAND_STATE_STAND);
+                Say(map, Gryan, "Par la Lumière... Elle était là, sous notre nez, depuis le début. " + HeroName + ", nous devons prévenir Hurlevent !");
+                return 0;
+            default:
+                return 0;
+        }
+    }
+
+    void Update(Map* map, uint32 diff)
+    {
+        if (!Active)
+            return;
+        Timer -= int32(diff);
+        if (Timer > 0)
+            return;
+        Timer = DoStep(map);
+        if (Timer <= 0)
+            Active = false;
+    }
+};
 
 class world_map_azimov_moonbrook_gathering : public WorldMapScript
 {
@@ -1648,6 +1815,8 @@ public:
 
     void OnUpdate(Map* map, uint32 diff) override
     {
+        _rise.Update(map, diff);
+
         if (_timer > diff)
         {
             _timer -= diff;
@@ -1661,10 +1830,17 @@ public:
             if (!player || !player->IsInWorld() || !player->IsAlive())
                 continue;
 
+            // « Le soulèvement de la Confrérie » : à l'étage de l'auberge de la Colline des Sentinelles
+            if (!_rise.Active && player->GetQuestStatus(QUEST_RISE_OF_THE_BROTHERHOOD) == QUEST_STATUS_INCOMPLETE
+                && player->GetExactDist(&RiseCenterPos) < 12.0f && std::fabs(player->GetPositionZ() - RiseCenterPos.GetPositionZ()) < 4.0f)
+                _rise.Start(player);
+
             if (player->GetQuestStatus(QUEST_DAWNING_OF_A_NEW_DAY) != QUEST_STATUS_INCOMPLETE)
                 continue;
 
-            if (player->GetExactDist2d(MoonbrookGatheringPos.GetPositionX(), MoonbrookGatheringPos.GetPositionY()) > MOONBROOK_GATHERING_RADIUS)
+            // dans la zone de Ruisselune (AreaTable 20) ou près du point de la quête
+            if (player->GetAreaId() != AREA_MOONBROOK
+                && player->GetExactDist2d(MoonbrookGatheringPos.GetPositionX(), MoonbrookGatheringPos.GetPositionY()) > MOONBROOK_GATHERING_RADIUS)
                 continue;
 
             ChatHandler(player->GetSession()).PSendSysMessage("|cffffd700Vous vous mêlez à la foule et entendez la Silhouette promettre une « aube nouvelle » aux sans-abri de la Marche de l'Ouest…|r");
@@ -1674,6 +1850,31 @@ public:
 
 private:
     uint32 _timer = 2000;
+    RiseOfTheBrotherhoodEvent _rise;
+};
+
+// Azimov : « Une vision du passé » (26320) : le Brûle-encens est refusé à l'entrée des Mortemines
+// (« Requiert votre présence à l'intérieur de l'entrée des Mortemines »). La quête est validée en entrant
+// dans le donjon des Mortemines (carte 36), sans la vision.
+static constexpr uint32 QUEST_A_VISION_OF_THE_PAST = 26320;
+static constexpr uint32 MAP_DEADMINES = 36;
+
+class player_azimov_vision_of_the_past : public PlayerScript
+{
+public:
+    player_azimov_vision_of_the_past() : PlayerScript("player_azimov_vision_of_the_past") { }
+
+    void OnMapChanged(Player* player) override
+    {
+        if (!player || player->GetMapId() != MAP_DEADMINES)
+            return;
+
+        if (player->GetQuestStatus(QUEST_A_VISION_OF_THE_PAST) != QUEST_STATUS_INCOMPLETE)
+            return;
+
+        ChatHandler(player->GetSession()).PSendSysMessage("|cffffd700L'encens se consume à l'entrée des Mortemines… Vous revoyez la nuit où Edwin VanCleef est tombé, et sa fille Vanessa jurer vengeance.|r");
+        player->CompleteQuest(QUEST_A_VISION_OF_THE_PAST);
+    }
 };
 
 void AddSC_westfall()
@@ -1701,4 +1902,5 @@ void AddSC_westfall()
     RegisterSpellScript(spell_westfall_sniper_fire_proc);
     RegisterSpellScript(spell_westfall_sniper_fire);
     new world_map_azimov_moonbrook_gathering();
+    new player_azimov_vision_of_the_past();
 }
