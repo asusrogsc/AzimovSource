@@ -27,6 +27,7 @@
 #include "Player.h"
 #include "QuestDef.h"
 #include "RBAC.h"
+#include "SpellAuraDefines.h"
 #include "TemporarySummon.h"
 #include "Util.h"
 #include "World.h"
@@ -148,7 +149,7 @@ namespace
             float z = p.z;
             if (z == 0.0f)
             {
-                z = player->GetMapHeight(p.x, p.y, player->GetPositionZ() + 60.0f, true, 200.0f);
+                z = player->GetMapHeight(p.x, p.y, player->GetPositionZ() + 3.0f, true, 100.0f);
                 if (z <= INVALID_HEIGHT)
                     continue;
             }
@@ -156,6 +157,9 @@ namespace
             {
                 c->SetReactState(REACT_PASSIVE);
                 c->SetHomePosition(c->GetPosition());
+                // ces PNJ portent souvent une invisibilité de quête (phase Blizzard) : inutile ici,
+                // le PNJ est déjà personnel, on la retire pour que le joueur le voie
+                c->RemoveAurasByType(SPELL_AURA_MOD_INVISIBILITY);
                 mine[p.id] = c->GetGUID();
             }
         }

@@ -50,6 +50,7 @@ void AddSC_azimov_quest_fix();
 void AddSC_azimov_quetes_gnomes();
 void AddSC_azimov_quetes_hautebrande();
 void AddSC_azimov_pnj_quetes();
+void AddSC_azimov_quetes_carmines();
 
 void AddCustomScripts()
 {
@@ -83,4 +84,5 @@ void AddCustomScripts()
 	AddSC_azimov_quetes_gnomes();
 	AddSC_azimov_quetes_hautebrande();
 	AddSC_azimov_pnj_quetes();
+	AddSC_azimov_quetes_carmines();
 }
