@@ -110,6 +110,33 @@ namespace
         return false;
     }
 
+    // Donne le crédit de quête pour cette cible (entrée directe ou via KillCredit), objectifs pas encore remplis.
+    void GiveKillCredit(Player* player, Creature* c)
+    {
+        CreatureTemplate const* ct = c->GetCreatureTemplate();
+        for (uint8 slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot)
+        {
+            uint32 questId = player->GetQuestSlotQuestId(slot);
+            if (!questId || player->GetQuestStatus(questId) != QUEST_STATUS_INCOMPLETE)
+                continue;
+            Quest const* q = sObjectMgr->GetQuestTemplate(questId);
+            if (!q)
+                continue;
+            for (uint8 i = 0; i < QUEST_OBJECTIVES_COUNT; ++i)
+            {
+                int32 req = q->RequiredNpcOrGo[i];
+                if (req <= 0 || player->GetReqKillOrCastCurrentCount(questId, req) >= q->RequiredNpcOrGoCount[i])
+                    continue;
+                bool match = uint32(req) == c->GetEntry();
+                for (uint32 kc : ct->KillCredit)
+                    if (kc && kc == uint32(req))
+                        match = true;
+                if (match)
+                    player->KilledMonsterCredit(uint32(req), c->GetGUID());
+            }
+        }
+    }
+
     bool Needed(Player* player, uint32 entry)
     {
         if (IsKillTarget(player, entry))
@@ -166,7 +193,12 @@ namespace
             if (current)
             {
                 if (!current->IsAlive())
+                {
+                    // tué mais objectif toujours vide (crédit refusé par le cœur) : on le donne
+                    if (player->GetExactDist(current) < 100.0f && IsKillTarget(player, p.entry))
+                        GiveKillCredit(player, current);
                     continue;                       // cadavre : il reste pour le butin puis disparaît seul
+                }
                 // cible bloquée à 1 PV (invincibilité prévue pour une scène Blizzard absente) : on l'achève
                 if (current->IsInCombat() && current->GetHealthPct() <= 2.0f && IsKillTarget(player, p.entry))
                 {
@@ -207,6 +239,7 @@ namespace
                     c->RemoveAurasByType(SPELL_AURA_SCHOOL_IMMUNITY);
                     c->RemoveAurasByType(SPELL_AURA_DAMAGE_IMMUNITY);
                     c->RemoveAurasByType(SPELL_AURA_MOD_STUN);
+                    c->m_PlayerDamageReq = 0;      // PNJ personnel : tout kill du joueur compte (butin + crédit)
                     // élite prévu pour un groupe ou l'escouade Bravo (absente ici) : vie plafonnée à 1,5x celle du joueur
                     if (c->isElite())
                     {
@@ -216,6 +249,7 @@ namespace
                             c->SetMaxHealth(cap);
                             c->SetFullHealth();
                         }
+                        c->m_PlayerDamageReq = 0;
                     }
                 }
                 c->SetHomePosition(c->GetPosition());
