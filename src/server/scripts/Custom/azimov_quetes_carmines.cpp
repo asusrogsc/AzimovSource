@@ -18,6 +18,7 @@
 #include "ObjectAccessor.h"
 #include "Random.h"
 #include "ScriptedCreature.h"
+#include "SpellAuraDefines.h"
 #include "SpellScript.h"
 #include "ObjectMgr.h"
 #include "Player.h"
@@ -111,27 +112,49 @@ namespace
             Creature* c = ObjectAccessor::GetCreature(*p, g);
             return !c || !c->IsAlive();
         });
-        if (st.invaders.size() >= 15 || tank->GetExactDist2d(&PosSiegeTank) > 700.0f)
+        if (st.invaders.size() >= 30 || tank->GetExactDist2d(&PosSiegeTank) > 700.0f)
             return;
-        for (int i = 0; i < 5; ++i)
+        for (int i = 0; i < 10; ++i)
         {
-            float angle = tank->GetOrientation() + frand(-1.3f, 1.3f);
-            float dist = frand(15.0f, 28.0f);
+            float angle = frand(0.0f, 2.0f * float(M_PI));
+            float dist = frand(12.0f, 22.0f);
             float x = tank->GetPositionX() + std::cos(angle) * dist;
             float y = tank->GetPositionY() + std::sin(angle) * dist;
             float z = tank->GetMapHeight(x, y, tank->GetPositionZ() + 10.0f);
             if (z <= INVALID_HEIGHT || std::fabs(z - tank->GetPositionZ()) > 15.0f)
                 continue;
-            if (TempSummon* orc = tank->SummonCreature(43775, x, y, z, angle + float(M_PI), TEMPSUMMON_TIMED_OR_DEAD_DESPAWN, 90000, p->GetGUID()))
+            if (TempSummon* orc = tank->SummonCreature(43775, x, y, z, angle + float(M_PI), TEMPSUMMON_TIMED_OR_DEAD_DESPAWN, 60000, p->GetGUID()))
             {
                 orc->SetFaction(2313);
-                orc->SetReactState(REACT_AGGRESSIVE);
-                orc->SetMaxHealth(std::max<uint32>(1, orc->GetMaxHealth() / 2));   // piétaille : le char les balaie
+                orc->SetLevel(p->getLevel());
+                orc->SetMaxHealth(1);                       // piétaille : un coup et c'est fini
                 orc->SetFullHealth();
+                orc->SetBaseWeaponDamage(BASE_ATTACK, MINDAMAGE, 1.0f);
+                orc->SetBaseWeaponDamage(BASE_ATTACK, MAXDAMAGE, 2.0f);
+                orc->UpdateDamagePhysical(BASE_ATTACK);
+                orc->SetReactState(REACT_AGGRESSIVE);
                 if (orc->AI())
                     orc->AI()->AttackStart(tank);
+                orc->GetMotionMaster()->MoveChase(tank);
                 st.invaders.push_back(orc->GetGUID());
             }
+        }
+    }
+
+    // Écrasement : chaque seconde, tout Rochenoire à portée du char est broyé et compte pour le joueur.
+    void TrampleInvaders(Player* p, Creature* tank, TankState& st)
+    {
+        for (ObjectGuid const& g : st.invaders)
+        {
+            Creature* orc = ObjectAccessor::GetCreature(*p, g);
+            if (!orc || !orc->IsAlive() || tank->GetExactDist(orc) > 12.0f)
+                continue;
+            if (p->GetQuestStatus(26708) != QUEST_STATUS_INCOMPLETE)
+                break;
+            uint32 before = p->GetReqKillOrCastCurrentCount(26708, 43775);
+            Unit::Kill(tank, orc, false);
+            if (p->GetReqKillOrCastCurrentCount(26708, 43775) == before)
+                p->KilledMonsterCredit(43775);
         }
     }
 
@@ -153,24 +176,31 @@ namespace
                 s_tanks.erase(it);
                 return;
             }
+            tank->SetFullHealth();                  // le char ne tombe plus
+            TrampleInvaders(p, tank, st);
+            if (p->GetQuestStatus(26708) != QUEST_STATUS_INCOMPLETE)
+                return;                             // libéré au tick suivant
             uint32 now = GameTime::GetGameTimeMS();
             if (now >= st.nextWaveMs)
             {
-                st.nextWaveMs = now + 5000;
+                st.nextWaveMs = now + 3000;
                 SpawnWave(p, tank, st);
             }
             return;
         }
 
-        if (!onQuest || p->GetExactDist2d(&PosSiegeTank) > 12.0f || p->IsMounted() || p->IsInCombat())
+        if (!onQuest || p->GetExactDist2d(&PosSiegeTank) > 60.0f || p->IsFlying() || p->IsInFlight())
             return;
+        if (p->IsMounted())
+            p->Dismount();
+        p->RemoveAurasByType(SPELL_AURA_MOUNTED);
 
-        TempSummon* tank = p->SummonCreature(43734, PosSiegeTank, TEMPSUMMON_TIMED_DESPAWN, 1800000, 0, p->GetGUID());
+        TempSummon* tank = p->SummonCreature(43734, p->GetPosition(), TEMPSUMMON_TIMED_DESPAWN, 1800000, 0, p->GetGUID());
         if (!tank)
             return;
         tank->SetFaction(p->GetFaction());
         tank->SetLevel(p->getLevel());
-        tank->SetMaxHealth(p->GetMaxHealth() * 6);
+        tank->SetMaxHealth(p->GetMaxHealth() * 20);
         tank->SetFullHealth();
         tank->SetBaseWeaponDamage(BASE_ATTACK, MINDAMAGE, float(p->getLevel() * 12));
         tank->SetBaseWeaponDamage(BASE_ATTACK, MAXDAMAGE, float(p->getLevel() * 18));
@@ -179,9 +209,9 @@ namespace
 
         TankState& st = s_tanks[key];
         st.tank = tank->GetGUID();
-        st.nextWaveMs = GameTime::GetGameTimeMS() + 3000;
+        st.nextWaveMs = GameTime::GetGameTimeMS() + 1000;
         if (tank->SetCharmedBy(p, CHARM_TYPE_POSSESS))
-            ChatHandler(p->GetSession()).PSendSysMessage("|cffffd100Vous prenez les commandes du char de siège de la compagnie Bravo ! Utilisez Charge fracassante (barre du char) pour écraser 200 Rochenoires.|r");
+            ChatHandler(p->GetSession()).PSendSysMessage("|cffffd100Vous prenez les commandes du char de siège de la compagnie Bravo ! Foncez dans les Rochenoires : tout ce qui touche le char est écrasé (Charge fracassante en bonus).|r");
     }
 
     void Tick(Player* p)
