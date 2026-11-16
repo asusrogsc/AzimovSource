@@ -2741,7 +2741,17 @@ bool Creature::CanSwim() const
     if (IsPet())
         return true;
 
-    return false;
+    // Azimov : beaucoup de créatures aquatiques de la base n'ont aucun drapeau de nage. Placées dans l'eau,
+    // elles ne peuvent pas poursuivre le joueur, s'enfuient et remontent leur vie. Une créature dont le point
+    // d'apparition est dans l'eau sait donc nager (calculé une seule fois).
+    if (_azHomeInWater < 0)
+    {
+        if (!IsInWorld())
+            return false;
+        _azHomeInWater = (!HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_CANT_SWIM)
+            && GetMap()->IsInWater(GetPhaseShift(), m_homePosition.GetPositionX(), m_homePosition.GetPositionY(), m_homePosition.GetPositionZ())) ? 1 : 0;
+    }
+    return _azHomeInWater == 1;
 }
 
 void Creature::InitializeCreatureMovementInfo(uint32 movementId)

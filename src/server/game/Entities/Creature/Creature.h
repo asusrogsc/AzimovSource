@@ -459,6 +459,7 @@ class TC_GAME_API Creature : public Unit, public GridObject<Creature>, public Ma
         uint32 m_originalEntry;
 
         Position m_homePosition;
+        mutable int8 _azHomeInWater = -1;   // Azimov : point d'apparition dans l'eau (-1 = pas encore calculé)
         Position m_transportHomePosition;
 
         bool DisableReputationGain;
