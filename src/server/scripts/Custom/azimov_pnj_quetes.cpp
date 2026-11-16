@@ -32,6 +32,7 @@
 #include "Util.h"
 #include "World.h"
 #include "WorldSession.h"
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <unordered_map>
@@ -80,8 +81,39 @@ namespace
         } while (res->NextRow());
     }
 
+    // Cible à tuer d'une quête en cours (objectif pas encore rempli) : boss/nommés absents de la base.
+    bool IsKillTarget(Player* player, uint32 entry)
+    {
+        CreatureTemplate const* ct = sObjectMgr->GetCreatureTemplate(entry);
+        for (uint8 slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot)
+        {
+            uint32 questId = player->GetQuestSlotQuestId(slot);
+            if (!questId || player->GetQuestStatus(questId) != QUEST_STATUS_INCOMPLETE)
+                continue;
+            Quest const* q = sObjectMgr->GetQuestTemplate(questId);
+            if (!q)
+                continue;
+            for (uint8 i = 0; i < QUEST_OBJECTIVES_COUNT; ++i)
+            {
+                int32 req = q->RequiredNpcOrGo[i];
+                if (req <= 0 || !q->RequiredNpcOrGoCount[i])
+                    continue;
+                bool match = uint32(req) == entry;
+                if (!match && ct)
+                    for (uint32 kc : ct->KillCredit)
+                        if (kc && kc == uint32(req))
+                            match = true;
+                if (match && player->GetReqKillOrCastCurrentCount(questId, req) < q->RequiredNpcOrGoCount[i])
+                    return true;
+            }
+        }
+        return false;
+    }
+
     bool Needed(Player* player, uint32 entry)
     {
+        if (IsKillTarget(player, entry))
+            return true;
         for (uint32 questId : sObjectMgr->GetCreatureQuestRelations(entry))
         {
             QuestStatus st = player->GetQuestStatus(questId);
@@ -133,7 +165,15 @@ namespace
 
             if (current)
             {
-                if (dist > HIDE_RANGE || !current->IsAlive() || !Needed(player, p.entry))
+                if (!current->IsAlive())
+                    continue;                       // cadavre : il reste pour le butin puis disparaît seul
+                // cible bloquée à 1 PV (invincibilité prévue pour une scène Blizzard absente) : on l'achève
+                if (current->IsInCombat() && current->GetHealthPct() <= 2.0f && IsKillTarget(player, p.entry))
+                {
+                    Unit::Kill(player, current);
+                    continue;
+                }
+                if (dist > HIDE_RANGE || !Needed(player, p.entry))
                 {
                     current->DespawnOrUnsummon();
                     mine.erase(it);
@@ -153,9 +193,31 @@ namespace
                 if (z <= INVALID_HEIGHT)
                     continue;
             }
-            if (TempSummon* c = player->SummonCreature(p.entry, Position(p.x, p.y, z, p.o), TEMPSUMMON_MANUAL_DESPAWN, 0, 0, player->GetGUID()))
+            bool cible = IsKillTarget(player, p.entry);
+            if (TempSummon* c = player->SummonCreature(p.entry, Position(p.x, p.y, z, p.o),
+                cible ? TEMPSUMMON_CORPSE_TIMED_DESPAWN : TEMPSUMMON_MANUAL_DESPAWN, cible ? 60000 : 0, 0, player->GetGUID()))
             {
-                c->SetReactState(REACT_PASSIVE);
+                if (!cible)
+                    c->SetReactState(REACT_PASSIVE);   // donneur de quête : reste calme
+                else
+                {
+                    c->SetReactState(REACT_AGGRESSIVE);
+                    c->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NOT_SELECTABLE | UNIT_FLAG_IMMUNE_TO_PC | UNIT_FLAG_PACIFIED);
+                    // insensible / immunisé (attente d'un événement scripté) : on retire ces protections
+                    c->RemoveAurasByType(SPELL_AURA_SCHOOL_IMMUNITY);
+                    c->RemoveAurasByType(SPELL_AURA_DAMAGE_IMMUNITY);
+                    c->RemoveAurasByType(SPELL_AURA_MOD_STUN);
+                    // élite prévu pour un groupe ou l'escouade Bravo (absente ici) : vie plafonnée à 1,5x celle du joueur
+                    if (c->isElite())
+                    {
+                        uint32 cap = std::max<uint32>(1, player->GetMaxHealth() * 3 / 2);
+                        if (c->GetMaxHealth() > cap)
+                        {
+                            c->SetMaxHealth(cap);
+                            c->SetFullHealth();
+                        }
+                    }
+                }
                 c->SetHomePosition(c->GetPosition());
                 // ces PNJ portent souvent une invisibilité de quête (phase Blizzard) : inutile ici,
                 // le PNJ est déjà personnel, on la retire pour que le joueur le voie
