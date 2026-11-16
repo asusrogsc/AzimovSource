@@ -9,6 +9,7 @@
 
 #include "ScriptMgr.h"
 #include "Chat.h"
+#include "CharmInfo.h"
 #include "Creature.h"
 #include "GameObject.h"
 #include "GameObjectAI.h"
@@ -168,11 +169,11 @@ namespace
         if (!tank)
             return;
         tank->SetFaction(p->GetFaction());
-        tank->SetLevel(p->GetLevel());
+        tank->SetLevel(p->getLevel());
         tank->SetMaxHealth(p->GetMaxHealth() * 6);
         tank->SetFullHealth();
-        tank->SetBaseWeaponDamage(BASE_ATTACK, MINDAMAGE, float(p->GetLevel() * 12));
-        tank->SetBaseWeaponDamage(BASE_ATTACK, MAXDAMAGE, float(p->GetLevel() * 18));
+        tank->SetBaseWeaponDamage(BASE_ATTACK, MINDAMAGE, float(p->getLevel() * 12));
+        tank->SetBaseWeaponDamage(BASE_ATTACK, MAXDAMAGE, float(p->getLevel() * 18));
         tank->UpdateDamagePhysical(BASE_ATTACK);
         tank->SetSpeedRate(MOVE_RUN, 1.5f);
 
