@@ -15,6 +15,7 @@
 #include "GameTime.h"
 #include "MotionMaster.h"
 #include "ObjectAccessor.h"
+#include "Random.h"
 #include "ScriptedCreature.h"
 #include "SpellScript.h"
 #include "ObjectMgr.h"
@@ -23,6 +24,9 @@
 #include "TemporarySummon.h"
 #include "World.h"
 #include "WorldSession.h"
+#include <algorithm>
+#include <cmath>
+#include <list>
 #include <unordered_map>
 
 namespace
@@ -71,10 +75,120 @@ namespace
     // 26512 Tuning the Gnomecorder : tester le gnomotophone au cimetière de Comté-du-Lac (carte [32, 39])
     Position const PosGraveyard = { -9182.3f, -2301.7f, 0.0f, 0.0f };
 
+    // 26708 AHHHHHHHHHHHH! : le char de siège de la compagnie Bravo (43734) attend près de Keeshan (position Blizzard du sort 81808).
+    // Le joueur en PREND LE CONTRÔLE (possession, barre d'actions du char : Charge fracassante) ; des vagues d'envahisseurs
+    // rochenoirs arrivent (aucun n'est placé dans la base aux Carmines). Les orcs tués par le char comptent pour le joueur.
+    Position const PosSiegeTank = { -9646.64f, -3454.94f, 117.49f, 1.94f };
+
+    struct TankState
+    {
+        ObjectGuid tank;
+        std::list<ObjectGuid> invaders;
+        uint32 nextWaveMs = 0;
+    };
+    std::unordered_map<ObjectGuid::LowType, TankState> s_tanks;
+
+    void ReleaseTank(Player* p, TankState& st)
+    {
+        if (Creature* tank = ObjectAccessor::GetCreature(*p, st.tank))
+        {
+            if (tank->GetCharmerGUID() == p->GetGUID())
+                tank->RemoveCharmedBy(p);
+            tank->DespawnOrUnsummon(1s);
+        }
+        for (ObjectGuid const& g : st.invaders)
+            if (Creature* c = ObjectAccessor::GetCreature(*p, g))
+                c->DespawnOrUnsummon();
+        st.invaders.clear();
+        st.tank.Clear();
+    }
+
+    void SpawnWave(Player* p, Creature* tank, TankState& st)
+    {
+        st.invaders.remove_if([p](ObjectGuid const& g)
+        {
+            Creature* c = ObjectAccessor::GetCreature(*p, g);
+            return !c || !c->IsAlive();
+        });
+        if (st.invaders.size() >= 15 || tank->GetExactDist2d(&PosSiegeTank) > 700.0f)
+            return;
+        for (int i = 0; i < 5; ++i)
+        {
+            float angle = tank->GetOrientation() + frand(-1.3f, 1.3f);
+            float dist = frand(15.0f, 28.0f);
+            float x = tank->GetPositionX() + std::cos(angle) * dist;
+            float y = tank->GetPositionY() + std::sin(angle) * dist;
+            float z = tank->GetMapHeight(x, y, tank->GetPositionZ() + 10.0f);
+            if (z <= INVALID_HEIGHT || std::fabs(z - tank->GetPositionZ()) > 15.0f)
+                continue;
+            if (TempSummon* orc = tank->SummonCreature(43775, x, y, z, angle + float(M_PI), TEMPSUMMON_TIMED_OR_DEAD_DESPAWN, 90000, p->GetGUID()))
+            {
+                orc->SetFaction(2313);
+                orc->SetReactState(REACT_AGGRESSIVE);
+                orc->SetMaxHealth(std::max<uint32>(1, orc->GetMaxHealth() / 2));   // piétaille : le char les balaie
+                orc->SetFullHealth();
+                if (orc->AI())
+                    orc->AI()->AttackStart(tank);
+                st.invaders.push_back(orc->GetGUID());
+            }
+        }
+    }
+
+    void TickSiegeTank(Player* p)
+    {
+        ObjectGuid::LowType key = p->GetGUID().GetCounter();
+        bool onQuest = p->GetQuestStatus(26708) == QUEST_STATUS_INCOMPLETE;
+        auto it = s_tanks.find(key);
+
+        if (it != s_tanks.end())
+        {
+            TankState& st = it->second;
+            Creature* tank = ObjectAccessor::GetCreature(*p, st.tank);
+            if (!onQuest || !tank || !tank->IsAlive() || !p->IsAlive())
+            {
+                if (!onQuest && p->GetQuestStatus(26708) == QUEST_STATUS_COMPLETE)
+                    ChatHandler(p->GetSession()).PSendSysMessage("|cffffd100200 Rochenoires écrasés ! Allez retrouver Keeshan de l'autre côté de la vallée.|r");
+                ReleaseTank(p, st);
+                s_tanks.erase(it);
+                return;
+            }
+            uint32 now = GameTime::GetGameTimeMS();
+            if (now >= st.nextWaveMs)
+            {
+                st.nextWaveMs = now + 5000;
+                SpawnWave(p, tank, st);
+            }
+            return;
+        }
+
+        if (!onQuest || p->GetExactDist2d(&PosSiegeTank) > 12.0f || p->IsMounted() || p->IsInCombat())
+            return;
+
+        TempSummon* tank = p->SummonCreature(43734, PosSiegeTank, TEMPSUMMON_TIMED_DESPAWN, 1800000, 0, p->GetGUID());
+        if (!tank)
+            return;
+        tank->SetFaction(p->GetFaction());
+        tank->SetLevel(p->GetLevel());
+        tank->SetMaxHealth(p->GetMaxHealth() * 6);
+        tank->SetFullHealth();
+        tank->SetBaseWeaponDamage(BASE_ATTACK, MINDAMAGE, float(p->GetLevel() * 12));
+        tank->SetBaseWeaponDamage(BASE_ATTACK, MAXDAMAGE, float(p->GetLevel() * 18));
+        tank->UpdateDamagePhysical(BASE_ATTACK);
+        tank->SetSpeedRate(MOVE_RUN, 1.5f);
+
+        TankState& st = s_tanks[key];
+        st.tank = tank->GetGUID();
+        st.nextWaveMs = GameTime::GetGameTimeMS() + 3000;
+        if (tank->SetCharmedBy(p, CHARM_TYPE_POSSESS))
+            ChatHandler(p->GetSession()).PSendSysMessage("|cffffd100Vous prenez les commandes du char de siège de la compagnie Bravo ! Utilisez Charge fracassante (barre du char) pour écraser 200 Rochenoires.|r");
+    }
+
     void Tick(Player* p)
     {
         if (!p->IsInWorld() || p->GetMapId() != 0 || p->IsBeingTeleported())
             return;
+
+        TickSiegeTank(p);
 
         if (p->GetQuestStatus(26512) == QUEST_STATUS_INCOMPLETE && p->GetExactDist2d(&PosGraveyard) < 30.0f)
         {
@@ -190,6 +304,13 @@ public:
 
     void OnLogout(Player* player) override
     {
+        auto tk = s_tanks.find(player->GetGUID().GetCounter());
+        if (tk != s_tanks.end())
+        {
+            ReleaseTank(player, tk->second);
+            s_tanks.erase(tk);
+        }
+
         auto it = s_boat.find(player->GetGUID().GetCounter());
         if (it == s_boat.end())
             return;
@@ -336,6 +457,12 @@ class spell_azimov_place_hydroglycerin : public SpellScript
         Quest const* q = sObjectMgr->GetQuestTemplate(26651);
         if (!q)
             return;
+        // seulement dans le Val de Rend (l'exigence de sous-zone du sort est retirée côté serveur)
+        if (player->GetMapId() != 0 || player->GetExactDist2d(-9600.0f, -3400.0f) > 400.0f)
+        {
+            ChatHandler(player->GetSession()).PSendSysMessage("|cffff2020Il faut poser la charge dans la Tour ou la Hutte à munitions rochenoire, au Val de Rend.|r");
+            return;
+        }
 
         int32 chosen = 0;
         float best = 40.0f;
@@ -370,8 +497,225 @@ class spell_azimov_place_hydroglycerin : public SpellScript
     }
 };
 
+// ---------------------------------------------------------------- 26694 The Grand Magus Doane (combat retail)
+// Tour d'Ilgalar : Doane (397) lance Boule de feu, appelle son serviteur, et à 20 % de vie il se téléporte
+// en évoquant Darkblaze : « Grand magus Doane affronté » (sort 81791 Doane Credit) pour les joueurs présents.
+enum GrandMagusDoane : uint32
+{
+    SPELL_DOANE_FIREBALL = 9053,
+    SPELL_DOANE_MINION   = 3611,    // Serviteur de Doane
+    SPELL_DOANE_CREDIT   = 81791,   // Doane Credit
+    NPC_DOANE            = 397,
+    QUEST_GRAND_MAGUS    = 26694,
+
+    EVENT_DOANE_FIREBALL = 1,
+    EVENT_DOANE_MINION,
+    EVENT_DOANE_VANISH,
+    EVENT_DOANE_GONE
+};
+
+struct npc_azimov_grand_magus_doane : public ScriptedAI
+{
+    npc_azimov_grand_magus_doane(Creature* creature) : ScriptedAI(creature), _escaped(false) { }
+
+    void Reset() override
+    {
+        _events.Reset();
+        _escaped = false;
+        me->SetReactState(REACT_AGGRESSIVE);
+        me->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NOT_SELECTABLE);
+    }
+
+    void JustEngagedWith(Unit* /*who*/) override
+    {
+        me->Say("Le chemin de la damnation vous attend...", LANG_UNIVERSAL);
+        _events.ScheduleEvent(EVENT_DOANE_FIREBALL, 2s);
+        _events.ScheduleEvent(EVENT_DOANE_MINION, 6s);
+    }
+
+    void DamageTaken(Unit* /*attacker*/, uint32& damage) override
+    {
+        if (_escaped)
+        {
+            damage = 0;
+            return;
+        }
+        // il ne meurt pas : sous 20 % il s'échappe
+        if (damage >= me->GetHealth() || me->HealthBelowPctDamaged(20, damage))
+        {
+            damage = std::min<uint32>(damage, me->GetHealth() > 1 ? me->GetHealth() - 1 : 0);
+            Escape();
+        }
+    }
+
+    void Escape()
+    {
+        _escaped = true;
+        _events.Reset();
+        me->InterruptNonMeleeSpells(true);
+        me->AttackStop();
+        me->SetReactState(REACT_PASSIVE);
+        me->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NOT_SELECTABLE);
+        me->GetMotionMaster()->Clear();
+        me->GetMotionMaster()->MoveIdle();
+        me->Say("Assez ! Vous croyez m'avoir vaincu ? Darkblaze se rit de vos efforts. Nous nous reverrons, mortels !", LANG_UNIVERSAL);
+        _events.ScheduleEvent(EVENT_DOANE_VANISH, 3s);
+    }
+
+    void GiveCredit()
+    {
+        me->CastSpell(me, SPELL_DOANE_CREDIT, true);
+        // au cas où le sort ne touche pas tout le monde : crédit à chaque joueur proche qui a la quête
+        std::list<Player*> players;
+        me->GetPlayerListInGrid(players, 60.0f);
+        for (Player* p : players)
+            if (p->GetQuestStatus(QUEST_GRAND_MAGUS) == QUEST_STATUS_INCOMPLETE)
+                p->KilledMonsterCredit(NPC_DOANE);
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        _events.Update(diff);
+        while (uint32 eventId = _events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                case EVENT_DOANE_FIREBALL:
+                    if (Unit* victim = me->GetVictim())
+                        DoCast(victim, SPELL_DOANE_FIREBALL);
+                    _events.ScheduleEvent(EVENT_DOANE_FIREBALL, 4s, 6s);
+                    break;
+                case EVENT_DOANE_MINION:
+                    me->Yell("SERVITEUR, à moi !", LANG_UNIVERSAL);
+                    DoCastSelf(SPELL_DOANE_MINION, true);
+                    _events.ScheduleEvent(EVENT_DOANE_MINION, 45s);
+                    break;
+                case EVENT_DOANE_VANISH:
+                    GiveCredit();
+                    me->HandleEmoteCommand(EMOTE_ONESHOT_SPELL_CAST_OMNI);
+                    _events.ScheduleEvent(EVENT_DOANE_GONE, 1500ms);
+                    break;
+                case EVENT_DOANE_GONE:
+                    me->DespawnOrUnsummon(0, 30s);   // disparaît (« téléporté »), revient 30 s plus tard
+                    break;
+            }
+        }
+
+        if (!_escaped && UpdateVictim())
+            DoMeleeAttackIfReady();
+    }
+
+private:
+    EventMap _events;
+    bool _escaped;
+};
+
+// Char de siège : suit le joueur, fonce dans les envahisseurs rochenoirs proches (Charge fracassante 81828)
+// et chaque orc qu'il tue compte pour la quête du joueur.
+struct npc_azimov_bravo_siege_tank : public ScriptedAI
+{
+    npc_azimov_bravo_siege_tank(Creature* creature) : ScriptedAI(creature), _scan(1000), _charge(4000), _wave(3000) { }
+
+    Player* Owner()
+    {
+        TempSummon* self = me->ToTempSummon();
+        Unit* u = self ? self->GetSummoner() : nullptr;
+        return u ? u->ToPlayer() : nullptr;
+    }
+
+    static bool IsInvader(Creature* c)
+    {
+        switch (c->GetEntry())
+        {
+            case 42937: case 43775: case 43786: case 48414: case 48432:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    void IsSummonedBy(Unit* summoner) override
+    {
+        if (Player* p = summoner ? summoner->ToPlayer() : nullptr)
+        {
+            me->SetFaction(p->GetFaction());
+            me->SetReactState(REACT_AGGRESSIVE);
+            me->SetSpeedRate(MOVE_RUN, 1.6f);
+            me->GetMotionMaster()->MoveFollow(p, 4.0f, float(M_PI));
+        }
+    }
+
+    void KilledUnit(Unit* victim) override
+    {
+        if (me->IsCharmed())
+            return;   // possédé : le jeu crédite déjà le joueur qui le pilote
+        Creature* c = victim ? victim->ToCreature() : nullptr;
+        if (Player* p = Owner())
+            if (c && IsInvader(c) && p->GetQuestStatus(26708) == QUEST_STATUS_INCOMPLETE)
+                p->KilledMonsterCredit(43775);
+    }
+
+    void EnterEvadeMode(EvadeReason /*why*/) override
+    {
+        me->CombatStop(true);
+        if (Player* p = Owner())
+            me->GetMotionMaster()->MoveFollow(p, 4.0f, float(M_PI));
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        Player* p = Owner();
+        if (!p)
+        {
+            me->DespawnOrUnsummon();
+            return;
+        }
+
+        if (_scan <= diff)
+        {
+            _scan = 1000;
+            if (!me->GetVictim())
+            {
+                Creature* target = nullptr;
+                float best = 30.0f;
+                for (uint32 entry : { 42937u, 43775u, 43786u, 48414u, 48432u })
+                    if (Creature* c = me->FindNearestCreature(entry, best))
+                    {
+                        best = me->GetDistance(c);
+                        target = c;
+                    }
+                if (target && target->IsAlive())
+                    AttackStart(target);
+            }
+        }
+        else
+            _scan -= diff;
+
+        if (!UpdateVictim())
+            return;
+
+        if (_charge <= diff)
+        {
+            _charge = 5000;
+            if (me->GetVictim() && me->IsWithinDist(me->GetVictim(), 10.0f))
+                DoCastSelf(81828, true);   // Charge fracassante : dégâts + projection autour du char
+        }
+        else
+            _charge -= diff;
+
+        DoMeleeAttackIfReady();
+    }
+
+private:
+    uint32 _scan;
+    uint32 _charge;
+    uint32 _wave;
+};
+
 void AddSC_azimov_quetes_carmines()
 {
+    RegisterCreatureAI(npc_azimov_bravo_siege_tank);
+    RegisterCreatureAI(npc_azimov_grand_magus_doane);
     RegisterSpellScript(spell_azimov_place_hydroglycerin);
     RegisterSpellScript(spell_azimov_ettin_control);
     RegisterCreatureAI(npc_azimov_controlled_ettin);
