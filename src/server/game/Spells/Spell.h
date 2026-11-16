@@ -551,6 +551,7 @@ class TC_GAME_API Spell
 
         // -------------------------------------------
         GameObject* focusObject;
+        int32 m_azQuestCredit = 0;   // Azimov : objectif de quête visé faute de conditions (crédit donné en fin de sort)
 
         // Damage and healing in effects need just calculate
         int32 m_damage;           // Damage  in effects count here

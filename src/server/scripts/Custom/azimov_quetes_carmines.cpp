@@ -323,8 +323,56 @@ private:
     bool _done;
 };
 
+// ---------------------------------------------------------------- 26651 To Win a War, You Gotta Become War
+// Le paquetage Bravo lance « Poser l'hydroglycérine » (81365 -> 81342 / 82585) : le sort ne trouve aucune cible
+// dans la base. On donne le crédit de l'emplacement le plus proche (tour / hutte à munitions), sinon le premier manquant.
+class spell_azimov_place_hydroglycerin : public SpellScript
+{
+    void HandleAfterCast()
+    {
+        Player* player = GetCaster() ? GetCaster()->ToPlayer() : nullptr;
+        if (!player || player->GetQuestStatus(26651) != QUEST_STATUS_INCOMPLETE)
+            return;
+        Quest const* q = sObjectMgr->GetQuestTemplate(26651);
+        if (!q)
+            return;
+
+        int32 chosen = 0;
+        float best = 40.0f;
+        for (uint8 i = 0; i < QUEST_OBJECTIVES_COUNT; ++i)
+        {
+            int32 t = q->RequiredNpcOrGo[i];
+            if (t <= 0 || player->GetReqKillOrCastCurrentCount(26651, t) >= q->RequiredNpcOrGoCount[i])
+                continue;
+            if (Creature* bunny = player->FindNearestCreature(uint32(t), best))
+            {
+                best = player->GetDistance(bunny);
+                chosen = t;
+            }
+        }
+        if (!chosen)   // repères absents de la base : premier objectif manquant
+            for (uint8 i = 0; i < QUEST_OBJECTIVES_COUNT && !chosen; ++i)
+            {
+                int32 t = q->RequiredNpcOrGo[i];
+                if (t > 0 && player->GetReqKillOrCastCurrentCount(26651, t) < q->RequiredNpcOrGoCount[i])
+                    chosen = t;
+            }
+        if (chosen)
+        {
+            player->KilledMonsterCredit(uint32(chosen));
+            ChatHandler(player->GetSession()).PSendSysMessage("|cffffd100Charge d'hydroglycérine en place !|r");
+        }
+    }
+
+    void Register() override
+    {
+        AfterCast.Register(&spell_azimov_place_hydroglycerin::HandleAfterCast);
+    }
+};
+
 void AddSC_azimov_quetes_carmines()
 {
+    RegisterSpellScript(spell_azimov_place_hydroglycerin);
     RegisterSpellScript(spell_azimov_ettin_control);
     RegisterCreatureAI(npc_azimov_controlled_ettin);
     new go_azimov_chain_lever();

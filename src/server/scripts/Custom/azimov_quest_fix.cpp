@@ -12,7 +12,8 @@
  *   mode 3 : chaque monstre tué dans la zone `zone` (0 = zone de la quête) fait progresser
  *   mode 4 : chaque PNJ `npc` tué fait progresser
  *   mode 5 : objectif « aller à un endroit » rempli en arrivant à moins de `radius` m du point (map, x, y)
- *            (comme une zone de déclenchement : les autres objectifs de la quête restent à faire)
+ *            (comme une zone de déclenchement : les autres objectifs de la quête restent à faire ;
+ *            avec `credit` / `item` : donne ce crédit / cet objet à cet endroit précis)
  * Ce qui est donné quand la condition est remplie :
  *   credit > 0 : crédit du PNJ `credit` (credit < 0 : objet du monde -credit)
  *   item > 0   : l'objet de quête `item` (mode 3/4 : 1 par mort, avec `chance` %)
@@ -233,7 +234,12 @@ namespace
             {
                 if (player->GetMapId() == f.map && player->GetExactDist2d(f.x, f.y) < f.radius
                     && player->GetQuestStatus(f.quest) == QUEST_STATUS_INCOMPLETE)
-                    player->AreaExploredOrEventHappens(f.quest);
+                {
+                    if (f.credit || f.item)
+                        ApplyFull(player, f);       // crédit / objet de cet endroit précis
+                    else
+                        player->AreaExploredOrEventHappens(f.quest);
+                }
                 continue;
             }
             if (f.mode > AZQF_DELAY)

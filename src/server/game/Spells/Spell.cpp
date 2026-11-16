@@ -40,6 +40,7 @@
 #include "LootMgr.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
+#include "QuestDef.h"
 #include "Opcodes.h"
 #include "PathGenerator.h"
 #include "Pet.h"
@@ -1143,6 +1144,53 @@ void Spell::SelectImplicitChannelTargets(SpellEffIndex effIndex, SpellImplicitTa
     }
 }
 
+// Azimov : beaucoup de sorts d'objets de quête « visent un PNJ / objet proche par numéro » sans que la base
+// dise lequel (aucune condition). On vise alors l'objectif de quête en cours du joueur le plus proche.
+static WorldObject* AzimovFindQuestObjectiveTarget(WorldObject* caster, float range, SpellTargetObjectTypes objType, int32& creditOut)
+{
+    Player* player = caster->ToPlayer();
+    if (!player)
+        return nullptr;
+    if (range <= 0.0f)
+        range = 30.0f;
+
+    bool wantUnit = objType == TARGET_OBJECT_TYPE_UNIT || objType == TARGET_OBJECT_TYPE_DEST;
+    bool wantGo = objType == TARGET_OBJECT_TYPE_GOBJ || objType == TARGET_OBJECT_TYPE_DEST;
+    WorldObject* best = nullptr;
+    float bestDist = range;
+
+    for (uint16 slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot)
+    {
+        uint32 questId = player->GetQuestSlotQuestId(slot);
+        if (!questId || player->GetQuestStatus(questId) != QUEST_STATUS_INCOMPLETE)
+            continue;
+        Quest const* quest = sObjectMgr->GetQuestTemplate(questId);
+        if (!quest)
+            continue;
+        for (uint8 i = 0; i < QUEST_OBJECTIVES_COUNT; ++i)
+        {
+            int32 t = quest->RequiredNpcOrGo[i];
+            if (!t || player->GetReqKillOrCastCurrentCount(questId, t) >= quest->RequiredNpcOrGoCount[i])
+                continue;
+            WorldObject* found = nullptr;
+            if (t > 0 && wantUnit)
+                found = caster->FindNearestCreature(uint32(t), bestDist);
+            else if (t < 0 && wantGo)
+                found = caster->FindNearestGameObject(uint32(-t), bestDist);
+            if (found)
+            {
+                bestDist = caster->GetDistance(found);
+                best = found;
+                // crédit direct seulement pour les repères (objets, PNJ non attaquables) : un monstre à tuer
+                // doit toujours être tué pour compter
+                Unit* unit = found->ToUnit();
+                creditOut = (unit && player->IsValidAttackTarget(unit)) ? 0 : t;
+            }
+        }
+    }
+    return best;
+}
+
 void Spell::SelectImplicitNearbyTargets(SpellEffIndex effIndex, SpellImplicitTargetInfo const& targetType, [[maybe_unused]] SpellTargetIndex targetIndex, uint32 effMask)
 {
     if (targetType.GetReferenceType() != TARGET_REFERENCE_TYPE_CASTER)
@@ -1215,7 +1263,11 @@ void Spell::SelectImplicitNearbyTargets(SpellEffIndex effIndex, SpellImplicitTar
         }
     }
 
-    WorldObject* target = SearchNearbyTarget(range, targetType.GetObjectType(), targetType.GetCheckType(), condList);
+    WorldObject* target = nullptr;
+    if (targetType.GetCheckType() == TARGET_CHECK_ENTRY && (!condList || condList->empty()))
+        target = AzimovFindQuestObjectiveTarget(m_caster, range, targetType.GetObjectType(), m_azQuestCredit);
+    if (!target)
+        target = SearchNearbyTarget(range, targetType.GetObjectType(), targetType.GetCheckType(), condList);
     if (!target)
     {
         TC_LOG_DEBUG("spells", "Spell::SelectImplicitNearbyTargets: cannot find nearby target for spell ID %u, effect %u", m_spellInfo->Id, effIndex);
@@ -4067,6 +4119,21 @@ void Spell::_handle_immediate_phase()
 
 void Spell::_handle_finish_phase()
 {
+    // Azimov : objectif de quête visé faute de conditions -> crédit, sauf si le sort donne déjà un crédit lui-même
+    if (m_azQuestCredit)
+    {
+        if (Player* player = m_caster->ToPlayer())
+            if (!m_spellInfo->HasEffect(SPELL_EFFECT_KILL_CREDIT) && !m_spellInfo->HasEffect(SPELL_EFFECT_KILL_CREDIT2)
+                && !m_spellInfo->HasEffect(SPELL_EFFECT_QUEST_COMPLETE))
+            {
+                if (m_azQuestCredit > 0)
+                    player->KilledMonsterCredit(uint32(m_azQuestCredit));
+                else
+                    player->KillCreditGO(uint32(-m_azQuestCredit));
+            }
+        m_azQuestCredit = 0;
+    }
+
     if (Unit* unitCaster = m_caster->ToUnit())
     {
         if (unitCaster->IsMovedByClient())
