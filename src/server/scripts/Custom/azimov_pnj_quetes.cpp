@@ -20,7 +20,10 @@
 
 #include "ScriptMgr.h"
 #include "Chat.h"
+#include "CellImpl.h"
 #include "Creature.h"
+#include "GridNotifiers.h"
+#include "GridNotifiersImpl.h"
 #include "DatabaseEnv.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
@@ -34,6 +37,7 @@
 #include "WorldSession.h"
 #include <algorithm>
 #include <cmath>
+#include <list>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -51,6 +55,22 @@ namespace
     std::vector<AzPnj> s_pnjs;
     // joueur -> (id du point -> PNJ personnel)
     std::unordered_map<ObjectGuid::LowType, std::unordered_map<uint32, ObjectGuid>> s_spawned;
+    // PNJ de quête présents mais INVISIBLES pour le joueur (aura d'invisibilité / détection manquante) :
+    // vrai PNJ -> copie personnelle visible
+    std::unordered_map<ObjectGuid::LowType, std::unordered_map<ObjectGuid, ObjectGuid>> s_copies;
+    float const HIDDEN_RANGE = 60.0f;
+    // Valideurs de quêtes terminées : copie au point de spawn si le vrai est hors phase / invisible / pas là
+    std::unordered_map<ObjectGuid::LowType, std::unordered_map<uint32, ObjectGuid>> s_enders;
+    struct SpawnPt { uint32 map; Position pos; };
+    std::unordered_map<uint32, std::vector<SpawnPt>> s_spawnIndex;   // entrée -> points de spawn de la base
+    bool s_spawnIndexBuilt = false;
+
+    void BuildSpawnIndex()
+    {
+        s_spawnIndexBuilt = true;
+        for (auto const& kv : sObjectMgr->GetAllCreatureData())
+            s_spawnIndex[kv.second.id].push_back({ kv.second.mapId, kv.second.spawnPoint });
+    }
 
     float const SHOW_RANGE = 120.0f;
     float const HIDE_RANGE = 150.0f;
@@ -168,6 +188,20 @@ namespace
 
     void DespawnAll(Player* player)
     {
+        auto en = s_enders.find(player->GetGUID().GetCounter());
+        if (en != s_enders.end())
+        {
+            for (auto const& kv : en->second)
+                Despawn(player, kv.second);
+            s_enders.erase(en);
+        }
+        auto ct = s_copies.find(player->GetGUID().GetCounter());
+        if (ct != s_copies.end())
+        {
+            for (auto const& kv : ct->second)
+                Despawn(player, kv.second);
+            s_copies.erase(ct);
+        }
         auto it = s_spawned.find(player->GetGUID().GetCounter());
         if (it == s_spawned.end())
             return;
@@ -176,10 +210,181 @@ namespace
         s_spawned.erase(it);
     }
 
+    struct HiddenQuestNpcCheck
+    {
+        Player* player;
+        bool operator()(Creature* c) const
+        {
+            if (!c->IsAlive() || c->IsSummon() || c->IsInCombat() || player->GetExactDist(c) > HIDDEN_RANGE)
+                return false;
+            QuestRelationResult gives = sObjectMgr->GetCreatureQuestRelations(c->GetEntry());
+            QuestRelationResult ends = sObjectMgr->GetCreatureQuestInvolvedRelations(c->GetEntry());
+            if (gives.begin() == gives.end() && ends.begin() == ends.end())
+                return false;
+            return !player->CanSeeOrDetect(c, false, false, false);
+        }
+    };
+
+    // Tout PNJ donneur/valideur de quête invisible pour ce joueur alors qu'il en a besoin : copie personnelle visible.
+    void TickHidden(Player* player)
+    {
+        auto& copies = s_copies[player->GetGUID().GetCounter()];
+
+        // nettoyage des copies devenues inutiles
+        for (auto it = copies.begin(); it != copies.end();)
+        {
+            Creature* real = ObjectAccessor::GetCreature(*player, it->first);
+            Creature* copy = ObjectAccessor::GetCreature(*player, it->second);
+            bool keep = real && copy && copy->IsAlive() && player->GetExactDist(real) <= HIDDEN_RANGE + 20.0f
+                && !player->CanSeeOrDetect(real, false, false, false) && Needed(player, real->GetEntry());
+            if (!keep)
+            {
+                if (copy)
+                    copy->DespawnOrUnsummon();
+                it = copies.erase(it);
+            }
+            else
+                ++it;
+        }
+
+        std::list<Creature*> found;
+        HiddenQuestNpcCheck check{ player };
+        Trinity::CreatureListSearcher<HiddenQuestNpcCheck> searcher(player, found, check);
+        Cell::VisitGridObjects(player, searcher, HIDDEN_RANGE);
+
+        for (Creature* real : found)
+        {
+            if (copies.count(real->GetGUID()) || !Needed(player, real->GetEntry()))
+                continue;
+            if (TempSummon* c = player->SummonCreature(real->GetEntry(), real->GetPosition(), TEMPSUMMON_MANUAL_DESPAWN, 0, 0, player->GetGUID()))
+            {
+                c->SetReactState(REACT_PASSIVE);
+                c->SetHomePosition(c->GetPosition());
+                c->RemoveAurasByType(SPELL_AURA_MOD_INVISIBILITY);
+                c->SetFlag(UNIT_NPC_FLAGS, UNIT_NPC_FLAG_QUESTGIVER | UNIT_NPC_FLAG_GOSSIP);
+                c->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NOT_SELECTABLE);
+                copies[real->GetGUID()] = c->GetGUID();
+            }
+        }
+        if (copies.empty())
+            s_copies.erase(player->GetGUID().GetCounter());
+    }
+
+    bool SeesEntryNearby(Player* player, uint32 entry, float range)
+    {
+        std::list<Creature*> lst;
+        player->GetCreatureListWithEntryInGrid(lst, entry, range);
+        for (Creature* c : lst)
+            if (c->IsAlive() && player->CanSeeOrDetect(c, false, false, false))
+                return true;
+        return false;
+    }
+
+    // Quête TERMINÉE mais son valideur n'est pas visible (autre phase, invisible, non posé à cet endroit) :
+    // copie personnelle à son point de spawn le plus proche.
+    void TickEnders(Player* player)
+    {
+        if (!s_spawnIndexBuilt)
+            BuildSpawnIndex();
+        auto& mine = s_enders[player->GetGUID().GetCounter()];
+
+        for (auto it = mine.begin(); it != mine.end();)
+        {
+            Creature* copy = ObjectAccessor::GetCreature(*player, it->second);
+            if (!copy || !copy->IsAlive() || player->GetExactDist(copy) > 150.0f || !Needed(player, it->first))
+            {
+                if (copy)
+                    copy->DespawnOrUnsummon();
+                it = mine.erase(it);
+            }
+            else
+                ++it;
+        }
+
+        for (uint8 slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot)
+        {
+            uint32 questId = player->GetQuestSlotQuestId(slot);
+            if (!questId || player->GetQuestStatus(questId) != QUEST_STATUS_COMPLETE)
+                continue;
+            for (uint32 entry : sObjectMgr->GetCreatureQuestInvolvedRelationsReverse(questId))
+            {
+                if (mine.count(entry))
+                    continue;
+                auto idx = s_spawnIndex.find(entry);
+                if (idx == s_spawnIndex.end())
+                    continue;
+                SpawnPt const* best = nullptr;
+                float bestDist = 100.0f;
+                for (SpawnPt const& sp : idx->second)
+                {
+                    if (sp.map != player->GetMapId())
+                        continue;
+                    float d = player->GetExactDist(sp.pos);
+                    if (d < bestDist)
+                    {
+                        bestDist = d;
+                        best = &sp;
+                    }
+                }
+                Position where;
+                if (best)
+                    where = best->pos;
+                else
+                {
+                    // pas de spawn proche : point de rendu affiché sur la carte (quest_poi, objectif -1)
+                    QuestPOIData const* poi = sObjectMgr->GetQuestPOIData(questId);
+                    if (!poi)
+                        continue;
+                    bool found = false;
+                    for (QuestPOIBlobData const& blob : poi->Blobs)
+                    {
+                        if (blob.ObjectiveIndex != -1 || uint32(blob.MapID) != player->GetMapId() || blob.Points.empty())
+                            continue;
+                        float sx = 0.0f, sy = 0.0f;
+                        for (QuestPOIBlobPoint const& pt : blob.Points)
+                        {
+                            sx += float(pt.X);
+                            sy += float(pt.Y);
+                        }
+                        sx /= float(blob.Points.size());
+                        sy /= float(blob.Points.size());
+                        if (player->GetExactDist2d(sx, sy) > 60.0f)
+                            continue;
+                        float z = player->GetMapHeight(sx, sy, player->GetPositionZ() + 5.0f, true, 50.0f);
+                        if (z <= INVALID_HEIGHT)
+                            continue;
+                        where.Relocate(sx, sy, z, player->GetAngle(sx, sy) + float(M_PI));
+                        found = true;
+                        break;
+                    }
+                    if (!found)
+                        continue;
+                }
+                if (SeesEntryNearby(player, entry, 120.0f))
+                    continue;
+                if (TempSummon* c = player->SummonCreature(entry, where, TEMPSUMMON_MANUAL_DESPAWN, 0, 0, player->GetGUID()))
+                {
+                    c->SetReactState(REACT_PASSIVE);
+                    c->SetHomePosition(c->GetPosition());
+                    c->RemoveAurasByType(SPELL_AURA_MOD_INVISIBILITY);
+                    c->SetFlag(UNIT_NPC_FLAGS, UNIT_NPC_FLAG_QUESTGIVER | UNIT_NPC_FLAG_GOSSIP);
+                    c->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NOT_SELECTABLE);
+                    mine[entry] = c->GetGUID();
+                }
+            }
+        }
+        if (mine.empty())
+            s_enders.erase(player->GetGUID().GetCounter());
+    }
+
     void Tick(Player* player)
     {
         if (!player->IsInWorld() || player->IsBeingTeleported())
             return;
+
+        TickEnders(player);
+
+        TickHidden(player);
 
         auto& mine = s_spawned[player->GetGUID().GetCounter()];
         for (AzPnj const& p : s_pnjs)
