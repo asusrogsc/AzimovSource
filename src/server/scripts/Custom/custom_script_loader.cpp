@@ -51,6 +51,8 @@ void AddSC_azimov_quetes_gnomes();
 void AddSC_azimov_quetes_hautebrande();
 void AddSC_azimov_pnj_quetes();
 void AddSC_azimov_quetes_carmines();
+void AddSC_azimov_quetes_penombre();
+void AddSC_azimov_glyphe_titan();
 
 void AddCustomScripts()
 {
@@ -85,4 +87,6 @@ void AddCustomScripts()
 	AddSC_azimov_quetes_hautebrande();
 	AddSC_azimov_pnj_quetes();
 	AddSC_azimov_quetes_carmines();
+	AddSC_azimov_quetes_penombre();
+	AddSC_azimov_glyphe_titan();
 }
