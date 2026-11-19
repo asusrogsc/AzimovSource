@@ -27,12 +27,16 @@
 #include "ScriptMgr.h"
 #include "Chat.h"
 #include "Config.h"
+#include "Creature.h"
 #include "CustomStats.h"
 #include "DatabaseEnv.h"
+#include "DBCStores.h"
+#include "GameObject.h"
 #include "Item.h"
 #include "ItemTemplate.h"
 #include "Log.h"
 #include "Player.h"
+#include "Random.h"
 #include "RBAC.h"
 #include "SpellAuras.h"
 #include "SpellMgr.h"
@@ -53,6 +57,8 @@ namespace
     char const* const ADDON_PREFIX = "AZTAL";
     constexpr uint8  FLAG_MAGIC = 0x1;
     constexpr uint8  FLAG_TITAN = 0x2;
+    constexpr uint8  FLAG_HARVEST_KEEP   = 0x4;   // Moisson abondante : le point de récolte peut ne pas s'épuiser
+    constexpr uint8  FLAG_HARVEST_POINTS = 0x8;   // Azimov Farming : chaque récolte donne de la Puissance Azimov
     constexpr uint32 SPELL_TITAN_GRIP_PENALTY = 49152;
     constexpr uint32 SPELL_STAVES   = 227;
     constexpr uint32 SPELL_POLEARMS = 200;
@@ -204,6 +210,50 @@ namespace
             if (AzTalent const* t = GetTalent(id))
                 flags |= t->flags;
         return flags;
+    }
+
+    // Herbe ou filon (verrou de compétence herboristerie / minage)
+    bool IsGatherNode(GameObject const* go)
+    {
+        if (!go || go->GetGoType() != GAMEOBJECT_TYPE_CHEST)
+            return false;
+        LockEntry const* lock = sLockStore.LookupEntry(go->GetGOInfo()->GetLockId());
+        if (!lock)
+            return false;
+        for (uint8 i = 0; i < MAX_LOCK_CASE; ++i)
+            if (lock->Type[i] == LOCK_KEY_SKILL && (lock->Index[i] == LOCKTYPE_HERBALISM || lock->Index[i] == LOCKTYPE_MINING))
+                return true;
+        return false;
+    }
+
+    // Azimov Farming : 1 à 2 Puissance Azimov par récolte réussie (réglable)
+    void GiveHarvestPoints(Player* player, uint8 flags)
+    {
+        if (!(flags & FLAG_HARVEST_POINTS))
+            return;
+        uint32 mini = uint32(sConfigMgr->GetIntDefault("Azimov.Talents.Farming.Min", 1));
+        uint32 maxi = uint32(sConfigMgr->GetIntDefault("Azimov.Talents.Farming.Max", 2));
+        if (maxi < mini)
+            maxi = mini;
+        if (uint32 amount = urand(mini, maxi))
+            player->ModifyCurrency(CurrencyId(), int32(amount));
+    }
+
+    // Crochet du cœur : herbe / filon entièrement ramassé. true = le point ne s'épuise pas.
+    bool OnGatherNodeLooted(Player* player, GameObject* go)
+    {
+        if (!player || !IsGatherNode(go))
+            return false;
+        uint8 flags = OwnedFlags(GetOwned(player));
+        GiveHarvestPoints(player, flags);
+        return (flags & FLAG_HARVEST_KEEP) && roll_chance_i(sConfigMgr->GetIntDefault("Azimov.Talents.Moisson.Chance", 10));
+    }
+
+    // Crochet du cœur : dépeçage entièrement ramassé
+    void OnSkinningLooted(Player* player, Creature* /*creature*/)
+    {
+        if (player)
+            GiveHarvestPoints(player, OwnedFlags(GetOwned(player)));
     }
 
     // Range l'arme d'un emplacement dans les sacs (rien si les sacs sont pleins)
@@ -596,6 +646,8 @@ public:
 void AddSC_azimov_talents()
 {
     AzimovBeforeInventoryLoad = &EarlyLoad;
+    AzimovGatherNodeLooted = &OnGatherNodeLooted;
+    AzimovSkinningLooted = &OnSkinningLooted;
     new azimov_talents_world();
     new azimov_talents_player();
     new azimov_talents_command();

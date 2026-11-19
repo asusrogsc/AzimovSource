@@ -326,6 +326,9 @@ void WorldSession::HandleLootReleaseOpcode(WorldPacket& recvData)
             DoLootRelease(lguid);
 }
 
+bool (*AzimovGatherNodeLooted)(Player* player, GameObject* go) = nullptr;
+void (*AzimovSkinningLooted)(Player* player, Creature* creature) = nullptr;
+
 void WorldSession::DoLootRelease(ObjectGuid lguid)
 {
     Player  *player = GetPlayer();
@@ -364,6 +367,8 @@ void WorldSession::DoLootRelease(ObjectGuid lguid)
                 else
                     go->SetLootState(GO_READY);
             }
+            else if (go->GetGoType() == GAMEOBJECT_TYPE_CHEST && loot->isLooted() && AzimovGatherNodeLooted && AzimovGatherNodeLooted(player, go))
+                go->SetLootState(GO_READY);                 // Azimov : Moisson abondante, le point ne s'épuise pas
             else
                 go->SetLootState(GO_JUST_DEACTIVATED);
 
@@ -435,6 +440,10 @@ void WorldSession::DoLootRelease(ObjectGuid lguid)
         if (loot->isLooted())
         {
             creature->RemoveFlag(UNIT_DYNAMIC_FLAGS, UNIT_DYNFLAG_LOOTABLE);
+
+            // Azimov : dépeçage terminé (talents de récolte)
+            if (loot->loot_type == LOOT_SKINNING && AzimovSkinningLooted)
+                AzimovSkinningLooted(player, creature);
 
             // skip pickpocketing loot for speed, skinning timer reduction is no-op in fact
             if (!creature->IsAlive())

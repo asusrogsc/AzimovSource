@@ -991,6 +991,14 @@ struct ResurrectionData
 class Player;
 TC_GAME_API extern void (*AzimovBeforeInventoryLoad)(Player* player);
 
+// Azimov : appelés à la fin d'une récolte (talents Azimov de récolte), définis dans LootHandler.cpp.
+// AzimovGatherNodeLooted : herbe / filon entièrement ramassé ; renvoie true pour que le point ne s'épuise pas.
+// AzimovSkinningLooted : dépeçage entièrement ramassé.
+class GameObject;
+class Creature;
+TC_GAME_API extern bool (*AzimovGatherNodeLooted)(Player* player, GameObject* go);
+TC_GAME_API extern void (*AzimovSkinningLooted)(Player* player, Creature* creature);
+
 class TC_GAME_API Player : public Unit, public GridObject<Player>
 {
     friend class WorldSession;
