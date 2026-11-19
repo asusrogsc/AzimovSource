@@ -150,6 +150,8 @@ std::array<uint32, MAX_CLASSES> const MasterySpells =
 
 uint64 const MAX_MONEY_AMOUNT = 9999999999ULL;
 
+void (*AzimovBeforeInventoryLoad)(Player* player) = nullptr;
+
 Player::Player(WorldSession* session) : Unit(true),
     _characterFlags(CHARACTER_FLAG_NONE), _characterFlags2(CHARACTER_FLAG_2_NONE)
 {
@@ -250,6 +252,7 @@ Player::Player(WorldSession* session) : Unit(true),
     m_canParry = false;
     m_canBlock = false;
     m_canTitanGrip = false;
+    m_canTitanGripMagic = false;
     m_titanGripPenaltySpellId = 0;
 
     m_temporaryUnsummonedPetNumber = 0;
@@ -9003,7 +9006,7 @@ uint8 Player::FindEquipSlot(ItemTemplate const* proto, uint32 slot, bool swap) c
             {
                 if (ItemTemplate const* mhWeaponProto = mhWeapon->GetTemplate())
                 {
-                    if (mhWeaponProto->GetSubClass() == ITEM_SUBCLASS_WEAPON_POLEARM || mhWeaponProto->GetSubClass() == ITEM_SUBCLASS_WEAPON_STAFF)
+                    if (!CanTitanGripMagic() && (mhWeaponProto->GetSubClass() == ITEM_SUBCLASS_WEAPON_POLEARM || mhWeaponProto->GetSubClass() == ITEM_SUBCLASS_WEAPON_STAFF))
                     {
                         const_cast<Player*>(this)->AutoUnequipOffhandIfNeed(true);
                         break;
@@ -9013,13 +9016,13 @@ uint8 Player::FindEquipSlot(ItemTemplate const* proto, uint32 slot, bool swap) c
 
             if (GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_OFFHAND))
             {
-                if (proto->GetSubClass() == ITEM_SUBCLASS_WEAPON_POLEARM || proto->GetSubClass() == ITEM_SUBCLASS_WEAPON_STAFF)
+                if (!CanTitanGripMagic() && (proto->GetSubClass() == ITEM_SUBCLASS_WEAPON_POLEARM || proto->GetSubClass() == ITEM_SUBCLASS_WEAPON_STAFF))
                 {
                     const_cast<Player*>(this)->AutoUnequipOffhandIfNeed(true);
                     break;
                 }
             }
-            if (CanDualWield() && CanTitanGrip() && proto->GetSubClass() != ITEM_SUBCLASS_WEAPON_POLEARM && proto->GetSubClass() != ITEM_SUBCLASS_WEAPON_STAFF)
+            if (CanDualWield() && CanTitanGrip() && (CanTitanGripMagic() || (proto->GetSubClass() != ITEM_SUBCLASS_WEAPON_POLEARM && proto->GetSubClass() != ITEM_SUBCLASS_WEAPON_STAFF)))
                 slots[1] = EQUIPMENT_SLOT_OFFHAND;
             break;
         case INVTYPE_TABARD:
@@ -10493,6 +10496,9 @@ InventoryResult Player::CanEquipItem(uint8 slot, uint16 &dest, Item* pItem, bool
                 else if (type == INVTYPE_2HWEAPON)
                 {
                     if (!CanDualWield() || !CanTitanGrip())
+                        return EQUIP_ERR_2HSKILLNOTFOUND;
+                    // Azimov : bâton / arme d'hast en main gauche seulement avec la Poigne titanesque magique
+                    if (!CanTitanGripMagic() && (pProto->GetSubClass() == ITEM_SUBCLASS_WEAPON_POLEARM || pProto->GetSubClass() == ITEM_SUBCLASS_WEAPON_STAFF))
                         return EQUIP_ERR_2HSKILLNOTFOUND;
                 }
 
@@ -17219,6 +17225,9 @@ bool Player::LoadFromDB(ObjectGuid guid, CharacterDatabaseQueryHolder const& hol
 
     // must be before inventory (some items required reputation check)
     m_reputationMgr->LoadFromDB(holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_REPUTATION));
+
+    if (AzimovBeforeInventoryLoad)
+        AzimovBeforeInventoryLoad(this);
 
     _LoadInventory(holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_INVENTORY), time_diff);
 

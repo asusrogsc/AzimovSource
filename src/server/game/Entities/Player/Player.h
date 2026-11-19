@@ -986,6 +986,11 @@ struct ResurrectionData
     uint32 Aura;
 };
 
+// Azimov : appelé juste avant le chargement de l'inventaire à la connexion (talents Azimov : Poigne titanesque,
+// ambidextrie…), pour que les armes en main gauche ne soient pas renvoyées dans les sacs à chaque connexion.
+class Player;
+TC_GAME_API extern void (*AzimovBeforeInventoryLoad)(Player* player);
+
 class TC_GAME_API Player : public Unit, public GridObject<Player>
 {
     friend class WorldSession;
@@ -1978,6 +1983,9 @@ class TC_GAME_API Player : public Unit, public GridObject<Player>
         bool CanTitanGrip() const { return m_canTitanGrip; }
         void SetCanTitanGrip(bool value, uint32 penaltySpellId = 0);
         void CheckTitanGripPenalty();
+        // Azimov : Poigne titanesque magique (bâtons et armes d'hast en main gauche)
+        bool CanTitanGripMagic() const { return m_canTitanGripMagic; }
+        void SetCanTitanGripMagic(bool value) { m_canTitanGripMagic = value; }
         bool CanTameExoticPets() const { return IsGameMaster() || HasAuraType(SPELL_AURA_ALLOW_TAME_PET_TYPE); }
 
         void SetRegularAttackTime();
@@ -2645,6 +2653,7 @@ class TC_GAME_API Player : public Unit, public GridObject<Player>
         bool m_canParry;
         bool m_canBlock;
         bool m_canTitanGrip;
+        bool m_canTitanGripMagic;
         uint32 m_titanGripPenaltySpellId;
         uint8 m_swingErrorMsg;
 

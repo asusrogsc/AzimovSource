@@ -6,12 +6,18 @@
  *   choice_group > 0 : plusieurs talents à la même position, un seul possédé ; l'échange est gratuit.
  *   spell_id > 0 : aura passive appliquée tant que le talent est possédé (ex. 99041 Poigne titanesque).
  *   versa / refining > 0 : score de Polyvalence / Raffinage ajouté tant que le talent est possédé (CustomStats).
+ *   flags : 1 = Poigne titanesque magique (bâtons et armes d'hast en main gauche, compétences bâton / hast)
+ *           2 = donne Poigne du titan + ambidextrie dès le chargement du personnage (avant l'inventaire),
+ *               sinon les armes à deux mains en main gauche reviennent dans les sacs à chaque connexion.
+ *   Alt + clic droit sur une arme à deux mains dans les sacs : l'équipe en main gauche (le client refuse le
+ *   glisser-déposer des bâtons / armes d'hast en main gauche).
  *   Réinitialisation d'un chemin (ou des deux) : tout est remboursé.
  *
  * Tables : azworld2.azimov_talent (définitions), azcharacters.character_azimov_talent (talents possédés)
  *
  * Addon (préfixe AZTAL, chuchotement addon à soi-même) :
- *   client -> serveur : "AZTAL_Q" (tout demander), "AZTAL_B:<id>" (acheter), "AZTAL_R:<chemin>" (0 = les deux)
+ *   client -> serveur : "AZTAL_Q" (tout demander), "AZTAL_B:<id>" (acheter), "AZTAL_R:<chemin>" (0 = les deux),
+ *                       "AZTAL_E:<sac>:<case>" (équiper en main gauche ; sac 0 = sac à dos, 1-4 = sacs, cases à partir de 1)
  *   serveur -> client : "S" début, "D:id~chemin~pos~coût~héroïque~choix~sort~icône~nom", "T:id~description",
  *                       "C" vider les talents possédés, "O:id,id,..." talents possédés, "F" fin (rafraîchir)
  *
@@ -23,6 +29,8 @@
 #include "Config.h"
 #include "CustomStats.h"
 #include "DatabaseEnv.h"
+#include "Item.h"
+#include "ItemTemplate.h"
 #include "Log.h"
 #include "Player.h"
 #include "RBAC.h"
@@ -43,6 +51,11 @@ using namespace Trinity::ChatCommands;
 namespace
 {
     char const* const ADDON_PREFIX = "AZTAL";
+    constexpr uint8  FLAG_MAGIC = 0x1;
+    constexpr uint8  FLAG_TITAN = 0x2;
+    constexpr uint32 SPELL_TITAN_GRIP_PENALTY = 49152;
+    constexpr uint32 SPELL_STAVES   = 227;
+    constexpr uint32 SPELL_POLEARMS = 200;
 
     struct AzTalent
     {
@@ -55,6 +68,7 @@ namespace
         uint32 spellId = 0;
         int32  versa = 0;
         int32  refining = 0;
+        uint8  flags = 0;
         std::string name;
         std::string icon;
         std::string description;
@@ -93,7 +107,7 @@ namespace
     {
         s_talents.clear();
         QueryResult result = WorldDatabase.Query(
-            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining FROM azimov_talent");
+            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags FROM azimov_talent");
         if (result)
         {
             do
@@ -112,6 +126,7 @@ namespace
                 t.description = f[9].GetString();
                 t.versa       = f[10].GetInt32();
                 t.refining    = f[11].GetInt32();
+                t.flags       = f[12].GetUInt8();
 
                 if (t.spellId && !sSpellMgr->GetSpellInfo(t.spellId))
                 {
@@ -180,6 +195,129 @@ namespace
             player->ApplyCustomRefiningRating(refining - old.refining, true);
         if (versa != old.versa || refining != old.refining)
             CustomStats::SendStatsToClient(player);
+    }
+
+    uint8 OwnedFlags(std::set<uint32> const& owned)
+    {
+        uint8 flags = 0;
+        for (uint32 id : owned)
+            if (AzTalent const* t = GetTalent(id))
+                flags |= t->flags;
+        return flags;
+    }
+
+    // Range l'arme d'un emplacement dans les sacs (rien si les sacs sont pleins)
+    void StoreEquipped(Player* player, uint8 slot)
+    {
+        Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
+        if (!item)
+            return;
+        ItemPosCountVec dest;
+        if (player->CanStoreItem(NULL_BAG, NULL_SLOT, dest, item, false) == EQUIP_ERR_OK)
+        {
+            player->RemoveItem(INVENTORY_SLOT_BAG_0, slot, true);
+            player->StoreItem(dest, item, true);
+        }
+    }
+
+    bool IsStaffOrPolearm(Item* item)
+    {
+        if (!item)
+            return false;
+        uint32 sub = item->GetTemplate()->GetSubClass();
+        return item->GetTemplate()->GetClass() == ITEM_CLASS_WEAPON &&
+            (sub == ITEM_SUBCLASS_WEAPON_STAFF || sub == ITEM_SUBCLASS_WEAPON_POLEARM);
+    }
+
+    // Poigne titanesque magique : drapeau du cœur + compétences bâton / arme d'hast
+    void ApplyFlags(Player* player)
+    {
+        bool magic = (OwnedFlags(GetOwned(player)) & FLAG_MAGIC) != 0;
+        if (magic)
+        {
+            player->SetCanTitanGripMagic(true);
+            uint16 value = uint16(player->GetMaxSkillValueForLevel());
+            if (!player->HasSkill(SKILL_STAVES))
+                player->SetSkill(SKILL_STAVES, 0, value, value);
+            if (!player->HasSkill(SKILL_POLEARMS))
+                player->SetSkill(SKILL_POLEARMS, 0, value, value);
+            player->AddWeaponProficiency((1 << ITEM_SUBCLASS_WEAPON_STAFF) | (1 << ITEM_SUBCLASS_WEAPON_POLEARM));
+            player->SendProficiency(ITEM_CLASS_WEAPON, player->GetWeaponProficiency());
+        }
+        else if (player->CanTitanGripMagic())
+        {
+            player->SetCanTitanGripMagic(false);
+            if (IsStaffOrPolearm(player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_OFFHAND)))
+                StoreEquipped(player, EQUIPMENT_SLOT_OFFHAND);
+            if (!player->HasSpell(SPELL_STAVES) && player->HasSkill(SKILL_STAVES))
+                player->SetSkill(SKILL_STAVES, 0, 0, 0);
+            if (!player->HasSpell(SPELL_POLEARMS) && player->HasSkill(SKILL_POLEARMS))
+                player->SetSkill(SKILL_POLEARMS, 0, 0, 0);
+            Item* main = player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_MAINHAND);
+            if (main && main->GetSkill() && !player->HasSkill(main->GetSkill()))
+                StoreEquipped(player, EQUIPMENT_SLOT_MAINHAND);
+        }
+        player->CheckTitanGripPenalty();
+    }
+
+    // Juste avant le chargement de l'inventaire (crochet du cœur AzimovBeforeInventoryLoad)
+    void EarlyLoad(Player* player)
+    {
+        ObjectGuid::LowType guid = player->GetGUID().GetCounter();
+        std::set<uint32> owned;
+        if (QueryResult result = CharacterDatabase.PQuery("SELECT talent_id FROM character_azimov_talent WHERE guid = %u", guid))
+        {
+            do
+                owned.insert(result->Fetch()[0].GetUInt32());
+            while (result->NextRow());
+        }
+        uint8 flags = OwnedFlags(owned);
+        if (flags & (FLAG_TITAN | FLAG_MAGIC))
+        {
+            if (!player->CanTitanGrip())
+                player->SetCanTitanGrip(true, SPELL_TITAN_GRIP_PENALTY);
+            if (!player->CanDualWield())
+                player->SetCanDualWield(true);
+        }
+        if (flags & FLAG_MAGIC)
+            player->SetCanTitanGripMagic(true);
+    }
+
+    // Alt + clic droit dans les sacs : arme à deux mains -> main gauche
+    void EquipOffhand(Player* player, uint32 clientBag, uint32 clientSlot)
+    {
+        if (clientSlot < 1 || clientBag > 4)
+            return;
+        uint8 bag, slot;
+        if (clientBag == 0)
+        {
+            bag = INVENTORY_SLOT_BAG_0;
+            slot = uint8(INVENTORY_SLOT_ITEM_START + clientSlot - 1);
+            if (slot >= INVENTORY_SLOT_ITEM_END)
+                return;
+        }
+        else
+        {
+            bag = uint8(INVENTORY_SLOT_BAG_START + clientBag - 1);
+            slot = uint8(clientSlot - 1);
+        }
+
+        Item* item = player->GetItemByPos(bag, slot);
+        if (!item || item->GetTemplate()->GetInventoryType() != INVTYPE_2HWEAPON)
+            return;
+        if (!player->CanTitanGrip() || (IsStaffOrPolearm(item) && !player->CanTitanGripMagic()))
+        {
+            ChatHandler(player->GetSession()).PSendSysMessage("|cff00ccff[Talents Azimov]|r Il faut la Poigne titanesque%s pour porter cette arme en main gauche.",
+                IsStaffOrPolearm(item) ? " magique" : "");
+            return;
+        }
+        if (!player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_MAINHAND))
+        {
+            ChatHandler(player->GetSession()).PSendSysMessage("|cff00ccff[Talents Azimov]|r Équipez d'abord une arme en main droite.");
+            return;
+        }
+        player->SwapItem(uint16(bag) << 8 | slot, uint16(INVENTORY_SLOT_BAG_0) << 8 | EQUIPMENT_SLOT_OFFHAND);
+        player->CheckTitanGripPenalty();
     }
 
     void Send(Player* player, std::string const& text)
@@ -255,8 +393,9 @@ namespace
             if (!t->choiceGroup || !old || old->choiceGroup != t->choiceGroup)
                 return;
 
-            // échange gratuit entre talents d'un même choix
-            RemoveAuraOf(player, old);
+            // échange gratuit entre talents d'un même choix (même aura : on ne la retire pas)
+            if (old->spellId != t->spellId)
+                RemoveAuraOf(player, old);
             {
                 std::lock_guard<std::mutex> guard(s_lock);
                 s_owned[guid].erase(current);
@@ -266,6 +405,7 @@ namespace
             CharacterDatabase.PExecute("INSERT IGNORE INTO character_azimov_talent (guid, talent_id) VALUES (%u, %u)", guid, id);
             ApplyAura(player, t);
             ApplyStats(player);
+            ApplyFlags(player);
             ChatHandler(player->GetSession()).PSendSysMessage("|cff00ccff[Talents Azimov]|r Choix changé : |cffffd700%s|r.", t->name.c_str());
             SendOwned(player);
             return;
@@ -288,6 +428,7 @@ namespace
         CharacterDatabase.PExecute("INSERT IGNORE INTO character_azimov_talent (guid, talent_id) VALUES (%u, %u)", guid, id);
         ApplyAura(player, t);
         ApplyStats(player);
+        ApplyFlags(player);
         ChatHandler(player->GetSession()).PSendSysMessage("|cff00ccff[Talents Azimov]|r Talent appris : |cffffd700%s|r.", t->name.c_str());
         SendOwned(player);
     }
@@ -321,6 +462,7 @@ namespace
         if (refund)
             player->ModifyCurrency(CurrencyId(), int32(refund));
         ApplyStats(player);
+        ApplyFlags(player);
 
         if (count)
             ChatHandler(player->GetSession()).PSendSysMessage("|cff00ccff[Talents Azimov]|r %u talent(s) réinitialisé(s), %u Puissance Azimov remboursée.",
@@ -346,6 +488,7 @@ namespace
         for (uint32 id : owned)
             ApplyAura(player, GetTalent(id));
         ApplyStats(player);
+        ApplyFlags(player);
     }
 }
 
@@ -388,6 +531,13 @@ public:
             Buy(player, uint32(strtoul(msg.c_str() + 8, nullptr, 10)));
         else if (msg.compare(0, 8, "AZTAL_R:") == 0)
             Reset(player, uint8(strtoul(msg.c_str() + 8, nullptr, 10)));
+        else if (msg.compare(0, 8, "AZTAL_E:") == 0)
+        {
+            char* end = nullptr;
+            uint32 bag = uint32(strtoul(msg.c_str() + 8, &end, 10));
+            uint32 slot = (end && *end == ':') ? uint32(strtoul(end + 1, nullptr, 10)) : 0;
+            EquipOffhand(player, bag, slot);
+        }
     }
 };
 
@@ -445,6 +595,7 @@ public:
 
 void AddSC_azimov_talents()
 {
+    AzimovBeforeInventoryLoad = &EarlyLoad;
     new azimov_talents_world();
     new azimov_talents_player();
     new azimov_talents_command();
