@@ -1,0 +1,451 @@
+/*
+ * azimov_talents.cpp - Talents Azimov (façon traits de Legion Remix)
+ *
+ *   Deux chemins de 50 talents en ligne : 1 = Récolte, 2 = Héroïque (héroïques aux positions 10/20/30/40/50).
+ *   Chaque talent s'achète avec la monnaie Puissance Azimov (900), dans l'ordre du chemin.
+ *   choice_group > 0 : plusieurs talents à la même position, un seul possédé ; l'échange est gratuit.
+ *   spell_id > 0 : aura passive appliquée tant que le talent est possédé (ex. 99041 Poigne titanesque).
+ *   versa / refining > 0 : score de Polyvalence / Raffinage ajouté tant que le talent est possédé (CustomStats).
+ *   Réinitialisation d'un chemin (ou des deux) : tout est remboursé.
+ *
+ * Tables : azworld2.azimov_talent (définitions), azcharacters.character_azimov_talent (talents possédés)
+ *
+ * Addon (préfixe AZTAL, chuchotement addon à soi-même) :
+ *   client -> serveur : "AZTAL_Q" (tout demander), "AZTAL_B:<id>" (acheter), "AZTAL_R:<chemin>" (0 = les deux)
+ *   serveur -> client : "S" début, "D:id~chemin~pos~coût~héroïque~choix~sort~icône~nom", "T:id~description",
+ *                       "C" vider les talents possédés, "O:id,id,..." talents possédés, "F" fin (rafraîchir)
+ *
+ * Commandes MJ : .aztalent recharger | .aztalent liste | .aztalent raz   (joueur ciblé ou soi-même)
+ */
+
+#include "ScriptMgr.h"
+#include "Chat.h"
+#include "Config.h"
+#include "CustomStats.h"
+#include "DatabaseEnv.h"
+#include "Log.h"
+#include "Player.h"
+#include "RBAC.h"
+#include "SpellAuras.h"
+#include "SpellMgr.h"
+#include "WorldSession.h"
+#include <cstdio>
+#include <cstdlib>
+#include <map>
+#include <mutex>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+using namespace Trinity::ChatCommands;
+
+namespace
+{
+    char const* const ADDON_PREFIX = "AZTAL";
+
+    struct AzTalent
+    {
+        uint32 id = 0;
+        uint8  path = 0;
+        uint8  position = 0;
+        uint32 cost = 0;
+        bool   heroic = false;
+        uint8  choiceGroup = 0;
+        uint32 spellId = 0;
+        int32  versa = 0;
+        int32  refining = 0;
+        std::string name;
+        std::string icon;
+        std::string description;
+    };
+
+    std::map<uint32, AzTalent> s_talents;                                     // id -> talent
+    std::mutex s_lock;
+    std::unordered_map<ObjectGuid::LowType, std::set<uint32>> s_owned;        // personnage -> talents
+
+    struct AppliedStats { int32 versa = 0; int32 refining = 0; };
+    std::unordered_map<ObjectGuid::LowType, AppliedStats> s_stats;           // personnage -> scores déjà appliqués
+
+    uint32 CurrencyId()
+    {
+        return uint32(sConfigMgr->GetIntDefault("Azimov.Puissance.MonnaieId", 900));
+    }
+
+    AzTalent const* GetTalent(uint32 id)
+    {
+        auto itr = s_talents.find(id);
+        return itr != s_talents.end() ? &itr->second : nullptr;
+    }
+
+    // Coupe une chaîne UTF-8 sans casser un caractère
+    std::string Utf8Cut(std::string const& s, size_t maxBytes)
+    {
+        if (s.size() <= maxBytes)
+            return s;
+        size_t n = maxBytes;
+        while (n > 0 && (uint8(s[n]) & 0xC0) == 0x80)
+            --n;
+        return s.substr(0, n);
+    }
+
+    void LoadTalents()
+    {
+        s_talents.clear();
+        QueryResult result = WorldDatabase.Query(
+            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining FROM azimov_talent");
+        if (result)
+        {
+            do
+            {
+                Field* f = result->Fetch();
+                AzTalent t;
+                t.id          = f[0].GetUInt32();
+                t.path        = f[1].GetUInt8();
+                t.position    = f[2].GetUInt8();
+                t.cost        = f[3].GetUInt32();
+                t.heroic      = f[4].GetUInt8() != 0;
+                t.choiceGroup = f[5].GetUInt8();
+                t.spellId     = f[6].GetUInt32();
+                t.name        = f[7].GetString();
+                t.icon        = f[8].GetString();
+                t.description = f[9].GetString();
+                t.versa       = f[10].GetInt32();
+                t.refining    = f[11].GetInt32();
+
+                if (t.spellId && !sSpellMgr->GetSpellInfo(t.spellId))
+                {
+                    TC_LOG_ERROR("sql.sql", "azimov_talent %u : sort %u introuvable, talent laissé sans effet.", t.id, t.spellId);
+                    t.spellId = 0;
+                }
+                s_talents[t.id] = t;
+            } while (result->NextRow());
+        }
+        TC_LOG_INFO("server.loading", ">> Talents Azimov : %u talents chargés", uint32(s_talents.size()));
+    }
+
+    std::set<uint32> GetOwned(Player* player)
+    {
+        std::lock_guard<std::mutex> guard(s_lock);
+        auto itr = s_owned.find(player->GetGUID().GetCounter());
+        return itr != s_owned.end() ? itr->second : std::set<uint32>();
+    }
+
+    // Talent possédé à cette position du chemin (0 si aucun)
+    uint32 OwnedAt(std::set<uint32> const& owned, uint8 path, uint8 position)
+    {
+        for (uint32 id : owned)
+            if (AzTalent const* t = GetTalent(id))
+                if (t->path == path && t->position == position)
+                    return id;
+        return 0;
+    }
+
+    void ApplyAura(Player* player, AzTalent const* t)
+    {
+        if (t && t->spellId && !player->HasAura(t->spellId))
+            player->AddAura(t->spellId, player);
+    }
+
+    void RemoveAuraOf(Player* player, AzTalent const* t)
+    {
+        if (t && t->spellId)
+            player->RemoveAurasDueToSpell(t->spellId);
+    }
+
+    // Recalcule Polyvalence / Raffinage des talents possédés et applique seulement la différence
+    void ApplyStats(Player* player)
+    {
+        std::set<uint32> owned = GetOwned(player);
+        int32 versa = 0, refining = 0;
+        for (uint32 id : owned)
+            if (AzTalent const* t = GetTalent(id))
+            {
+                versa += t->versa;
+                refining += t->refining;
+            }
+
+        AppliedStats old;
+        {
+            std::lock_guard<std::mutex> guard(s_lock);
+            AppliedStats& entry = s_stats[player->GetGUID().GetCounter()];
+            old = entry;
+            entry.versa = versa;
+            entry.refining = refining;
+        }
+
+        if (versa != old.versa)
+            player->ApplyCustomVersatilityRating(versa - old.versa, true);
+        if (refining != old.refining)
+            player->ApplyCustomRefiningRating(refining - old.refining, true);
+        if (versa != old.versa || refining != old.refining)
+            CustomStats::SendStatsToClient(player);
+    }
+
+    void Send(Player* player, std::string const& text)
+    {
+        player->WhisperAddon(text, ADDON_PREFIX, player);
+    }
+
+    void SendOwned(Player* player)
+    {
+        std::set<uint32> owned = GetOwned(player);
+        Send(player, "C");
+        std::string line = "O:";
+        for (uint32 id : owned)
+        {
+            std::string part = std::to_string(id);
+            if (line.size() + part.size() + 1 > 240)
+            {
+                Send(player, line);
+                line = "O:";
+            }
+            if (line.size() > 2)
+                line += ",";
+            line += part;
+        }
+        if (line.size() > 2)
+            Send(player, line);
+        Send(player, "F");
+    }
+
+    void SendAll(Player* player)
+    {
+        Send(player, "S");
+        for (auto const& kv : s_talents)
+        {
+            AzTalent const& t = kv.second;
+            char head[96];
+            snprintf(head, sizeof(head), "D:%u~%u~%u~%u~%u~%u~%u~", t.id, t.path, t.position, t.cost,
+                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining) ? 1 : 0);
+            Send(player, Utf8Cut(std::string(head) + t.icon + "~" + t.name, 250));
+            if (!t.description.empty())
+                Send(player, Utf8Cut("T:" + std::to_string(t.id) + "~" + t.description, 250));
+        }
+        SendOwned(player);
+    }
+
+    void Notify(Player* player, char const* text)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("|cff00ccff[Talents Azimov]|r %s", text);
+    }
+
+    void Buy(Player* player, uint32 id)
+    {
+        AzTalent const* t = GetTalent(id);
+        if (!t)
+            return;
+
+        std::set<uint32> owned = GetOwned(player);
+        if (owned.count(id))
+            return;
+
+        if (t->position > 1 && !OwnedAt(owned, t->path, t->position - 1))
+        {
+            Notify(player, "Achetez d'abord le talent précédent de ce chemin.");
+            return;
+        }
+
+        ObjectGuid::LowType guid = player->GetGUID().GetCounter();
+        uint32 current = OwnedAt(owned, t->path, t->position);
+
+        if (current)
+        {
+            AzTalent const* old = GetTalent(current);
+            if (!t->choiceGroup || !old || old->choiceGroup != t->choiceGroup)
+                return;
+
+            // échange gratuit entre talents d'un même choix
+            RemoveAuraOf(player, old);
+            {
+                std::lock_guard<std::mutex> guard(s_lock);
+                s_owned[guid].erase(current);
+                s_owned[guid].insert(id);
+            }
+            CharacterDatabase.PExecute("DELETE FROM character_azimov_talent WHERE guid = %u AND talent_id = %u", guid, current);
+            CharacterDatabase.PExecute("INSERT IGNORE INTO character_azimov_talent (guid, talent_id) VALUES (%u, %u)", guid, id);
+            ApplyAura(player, t);
+            ApplyStats(player);
+            ChatHandler(player->GetSession()).PSendSysMessage("|cff00ccff[Talents Azimov]|r Choix changé : |cffffd700%s|r.", t->name.c_str());
+            SendOwned(player);
+            return;
+        }
+
+        uint32 currency = CurrencyId();
+        if (t->cost && !player->HasCurrency(currency, t->cost))
+        {
+            ChatHandler(player->GetSession()).PSendSysMessage("|cff00ccff[Talents Azimov]|r Il faut %u Puissance Azimov pour |cffffd700%s|r.",
+                t->cost, t->name.c_str());
+            return;
+        }
+
+        if (t->cost)
+            player->ModifyCurrency(currency, -int32(t->cost));
+        {
+            std::lock_guard<std::mutex> guard(s_lock);
+            s_owned[guid].insert(id);
+        }
+        CharacterDatabase.PExecute("INSERT IGNORE INTO character_azimov_talent (guid, talent_id) VALUES (%u, %u)", guid, id);
+        ApplyAura(player, t);
+        ApplyStats(player);
+        ChatHandler(player->GetSession()).PSendSysMessage("|cff00ccff[Talents Azimov]|r Talent appris : |cffffd700%s|r.", t->name.c_str());
+        SendOwned(player);
+    }
+
+    // path = 0 : les deux chemins. Rembourse tout.
+    uint32 Reset(Player* player, uint8 path)
+    {
+        std::set<uint32> owned = GetOwned(player);
+        ObjectGuid::LowType guid = player->GetGUID().GetCounter();
+        uint32 refund = 0, count = 0;
+
+        for (uint32 id : owned)
+        {
+            AzTalent const* t = GetTalent(id);
+            if (t && path && t->path != path)
+                continue;
+
+            if (t)
+            {
+                refund += t->cost;
+                RemoveAuraOf(player, t);
+            }
+            {
+                std::lock_guard<std::mutex> guard(s_lock);
+                s_owned[guid].erase(id);
+            }
+            CharacterDatabase.PExecute("DELETE FROM character_azimov_talent WHERE guid = %u AND talent_id = %u", guid, id);
+            ++count;
+        }
+
+        if (refund)
+            player->ModifyCurrency(CurrencyId(), int32(refund));
+        ApplyStats(player);
+
+        if (count)
+            ChatHandler(player->GetSession()).PSendSysMessage("|cff00ccff[Talents Azimov]|r %u talent(s) réinitialisé(s), %u Puissance Azimov remboursée.",
+                count, refund);
+        SendOwned(player);
+        return count;
+    }
+
+    void LoadPlayer(Player* player)
+    {
+        ObjectGuid::LowType guid = player->GetGUID().GetCounter();
+        std::set<uint32> owned;
+        if (QueryResult result = CharacterDatabase.PQuery("SELECT talent_id FROM character_azimov_talent WHERE guid = %u", guid))
+        {
+            do
+                owned.insert(result->Fetch()[0].GetUInt32());
+            while (result->NextRow());
+        }
+        {
+            std::lock_guard<std::mutex> guard(s_lock);
+            s_owned[guid] = owned;
+        }
+        for (uint32 id : owned)
+            ApplyAura(player, GetTalent(id));
+        ApplyStats(player);
+    }
+}
+
+class azimov_talents_world : public WorldScript
+{
+public:
+    azimov_talents_world() : WorldScript("azimov_talents_world") { }
+
+    void OnStartup() override
+    {
+        LoadTalents();
+    }
+};
+
+class azimov_talents_player : public PlayerScript
+{
+public:
+    azimov_talents_player() : PlayerScript("azimov_talents_player") { }
+
+    void OnLogin(Player* player, bool /*firstLogin*/) override
+    {
+        LoadPlayer(player);
+    }
+
+    void OnLogout(Player* player) override
+    {
+        std::lock_guard<std::mutex> guard(s_lock);
+        s_owned.erase(player->GetGUID().GetCounter());
+        s_stats.erase(player->GetGUID().GetCounter());
+    }
+
+    void OnChat(Player* player, uint32 /*type*/, uint32 lang, std::string& msg, Player* receiver) override
+    {
+        if (lang != LANG_ADDON || receiver != player || msg.compare(0, 6, "AZTAL_") != 0)
+            return;
+
+        if (msg == "AZTAL_Q")
+            SendAll(player);
+        else if (msg.compare(0, 8, "AZTAL_B:") == 0)
+            Buy(player, uint32(strtoul(msg.c_str() + 8, nullptr, 10)));
+        else if (msg.compare(0, 8, "AZTAL_R:") == 0)
+            Reset(player, uint8(strtoul(msg.c_str() + 8, nullptr, 10)));
+    }
+};
+
+class azimov_talents_command : public CommandScript
+{
+public:
+    azimov_talents_command() : CommandScript("azimov_talents_command") { }
+
+    std::vector<ChatCommand> GetCommands() const override
+    {
+        static std::vector<ChatCommand> subTable =
+        {
+            { "recharger", rbac::RBAC_PERM_COMMAND_RELOAD, false, &HandleReload, "" },
+            { "liste",     rbac::RBAC_PERM_COMMAND_GPS,    false, &HandleList,   "" },
+            { "raz",       rbac::RBAC_PERM_COMMAND_RELOAD, false, &HandleReset,  "" },
+        };
+        static std::vector<ChatCommand> commandTable =
+        {
+            { "aztalent", rbac::RBAC_PERM_COMMAND_GPS, false, nullptr, "", subTable },
+        };
+        return commandTable;
+    }
+
+    static bool HandleReload(ChatHandler* handler, char const* /*args*/)
+    {
+        LoadTalents();
+        if (Player* self = handler->GetSession() ? handler->GetSession()->GetPlayer() : nullptr)
+            ApplyStats(self);
+        handler->PSendSysMessage("Talents Azimov : %u talents rechargés (les autres joueurs en ligne : effet à leur prochaine connexion).", uint32(s_talents.size()));
+        return true;
+    }
+
+    static bool HandleList(ChatHandler* handler, char const* /*args*/)
+    {
+        Player* target = handler->getSelectedPlayerOrSelf();
+        if (!target)
+            return false;
+        std::set<uint32> owned = GetOwned(target);
+        handler->PSendSysMessage("%s : %u talent(s) Azimov.", target->GetName().c_str(), uint32(owned.size()));
+        for (uint32 id : owned)
+            if (AzTalent const* t = GetTalent(id))
+                handler->PSendSysMessage("  [%u] chemin %u, position %u : %s", t->id, t->path, t->position, t->name.c_str());
+        return true;
+    }
+
+    static bool HandleReset(ChatHandler* handler, char const* /*args*/)
+    {
+        Player* target = handler->getSelectedPlayerOrSelf();
+        if (!target)
+            return false;
+        handler->PSendSysMessage("%s : %u talent(s) réinitialisé(s).", target->GetName().c_str(), Reset(target, 0));
+        return true;
+    }
+};
+
+void AddSC_azimov_talents()
+{
+    new azimov_talents_world();
+    new azimov_talents_player();
+    new azimov_talents_command();
+}

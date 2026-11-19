@@ -53,6 +53,7 @@ void AddSC_azimov_pnj_quetes();
 void AddSC_azimov_quetes_carmines();
 void AddSC_azimov_quetes_penombre();
 void AddSC_azimov_glyphe_titan();
+void AddSC_azimov_talents();
 
 void AddCustomScripts()
 {
@@ -89,4 +90,5 @@ void AddCustomScripts()
 	AddSC_azimov_quetes_carmines();
 	AddSC_azimov_quetes_penombre();
 	AddSC_azimov_glyphe_titan();
+	AddSC_azimov_talents();
 }
