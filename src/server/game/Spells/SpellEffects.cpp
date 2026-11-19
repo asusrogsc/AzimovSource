@@ -1315,6 +1315,8 @@ void Spell::EffectHealthLeech(SpellEffIndex effIndex)
     }
 }
 
+uint32 (*AzimovCraftCount)(Player* player, SpellInfo const* spellInfo, uint32 count) = nullptr;
+
 void Spell::DoCreateItem(uint32 /*i*/, uint32 itemtype)
 {
     if (!unitTarget || unitTarget->GetTypeId() != TYPEID_PLAYER)
@@ -1390,6 +1392,11 @@ void Spell::DoCreateItem(uint32 /*i*/, uint32 itemtype)
 
     // CustomStats : Raffinage, objets supplémentaires en artisanat
     num_to_add *= CustomStats::RollCraftMultiplier(player, m_spellInfo);
+
+    // Azimov : talents d'artisanat (Artisan inspiré…)
+    if (AzimovCraftCount)
+        num_to_add = AzimovCraftCount(player, m_spellInfo, num_to_add);
+
     if (num_to_add > pProto->GetMaxStackSize())
         num_to_add = pProto->GetMaxStackSize();
 

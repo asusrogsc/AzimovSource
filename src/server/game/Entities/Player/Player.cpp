@@ -151,6 +151,7 @@ std::array<uint32, MAX_CLASSES> const MasterySpells =
 uint64 const MAX_MONEY_AMOUNT = 9999999999ULL;
 
 void (*AzimovBeforeInventoryLoad)(Player* player) = nullptr;
+uint32 (*AzimovProfessionStep)(Player* player, uint16 skillId, uint32 step) = nullptr;
 
 Player::Player(WorldSession* session) : Unit(true),
     _characterFlags(CHARACTER_FLAG_NONE), _characterFlags2(CHARACTER_FLAG_2_NONE)
@@ -5383,6 +5384,10 @@ bool Player::UpdateSkillPro(uint16 skillId, int32 chance, uint32 step)
         TC_LOG_DEBUG("entities.player.skills", "Player::UpdateSkillPro Chance=%3.1f%% missed", chance / 10.0f);
         return false;
     }
+
+    // Azimov : talents de métier (points doublés…)
+    if (AzimovProfessionStep)
+        step = AzimovProfessionStep(this, skillId, step);
 
     uint16 new_value = value + step;
     if (new_value > max)

@@ -999,6 +999,13 @@ class Creature;
 TC_GAME_API extern bool (*AzimovGatherNodeLooted)(Player* player, GameObject* go);
 TC_GAME_API extern void (*AzimovSkinningLooted)(Player* player, Creature* creature);
 
+// Azimov : points gagnés à chaque montée de métier (talents Azimov), renvoie le nombre de points à donner.
+TC_GAME_API extern uint32 (*AzimovProfessionStep)(Player* player, uint16 skillId, uint32 step);
+
+// Azimov : nombre d'objets créés par une fabrication (talents Azimov), défini dans SpellEffects.cpp.
+class SpellInfo;
+TC_GAME_API extern uint32 (*AzimovCraftCount)(Player* player, SpellInfo const* spellInfo, uint32 count);
+
 class TC_GAME_API Player : public Unit, public GridObject<Player>
 {
     friend class WorldSession;

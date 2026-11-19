@@ -39,6 +39,7 @@
 #include "Random.h"
 #include "RBAC.h"
 #include "SpellAuras.h"
+#include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "WorldSession.h"
 #include <cstdio>
@@ -59,6 +60,8 @@ namespace
     constexpr uint8  FLAG_TITAN = 0x2;
     constexpr uint8  FLAG_HARVEST_KEEP   = 0x4;   // Moisson abondante : le point de récolte peut ne pas s'épuiser
     constexpr uint8  FLAG_HARVEST_POINTS = 0x8;   // Azimov Farming : chaque récolte donne de la Puissance Azimov
+    constexpr uint8  FLAG_PROF_DOUBLE    = 0x10;  // Apprentissage éclair : chance de points de métier doublés
+    constexpr uint8  FLAG_CRAFT_DOUBLE   = 0x20;  // Artisan inspiré : chance d'objet fabriqué en double
     constexpr uint32 SPELL_TITAN_GRIP_PENALTY = 49152;
     constexpr uint32 SPELL_STAVES   = 227;
     constexpr uint32 SPELL_POLEARMS = 200;
@@ -75,6 +78,7 @@ namespace
         int32  versa = 0;
         int32  refining = 0;
         uint8  flags = 0;
+        uint8  harvestKeep = 0;   // % de chances de Moisson abondante (cumulable)
         std::string name;
         std::string icon;
         std::string description;
@@ -113,7 +117,7 @@ namespace
     {
         s_talents.clear();
         QueryResult result = WorldDatabase.Query(
-            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags FROM azimov_talent");
+            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags, harvest_keep FROM azimov_talent");
         if (result)
         {
             do
@@ -133,6 +137,7 @@ namespace
                 t.versa       = f[10].GetInt32();
                 t.refining    = f[11].GetInt32();
                 t.flags       = f[12].GetUInt8();
+                t.harvestKeep = f[13].GetUInt8();
 
                 if (t.spellId && !sSpellMgr->GetSpellInfo(t.spellId))
                 {
@@ -244,9 +249,16 @@ namespace
     {
         if (!player || !IsGatherNode(go))
             return false;
-        uint8 flags = OwnedFlags(GetOwned(player));
+        std::set<uint32> owned = GetOwned(player);
+        uint8 flags = OwnedFlags(owned);
         GiveHarvestPoints(player, flags);
-        return (flags & FLAG_HARVEST_KEEP) && roll_chance_i(sConfigMgr->GetIntDefault("Azimov.Talents.Moisson.Chance", 10));
+
+        // Moisson abondante : héroïque (config, 10 %) + petits talents (+1 % chacun…)
+        int32 chance = (flags & FLAG_HARVEST_KEEP) ? sConfigMgr->GetIntDefault("Azimov.Talents.Moisson.Chance", 10) : 0;
+        for (uint32 id : owned)
+            if (AzTalent const* t = GetTalent(id))
+                chance += t->harvestKeep;
+        return chance > 0 && roll_chance_i(chance);
     }
 
     // Crochet du cœur : dépeçage entièrement ramassé
@@ -254,6 +266,52 @@ namespace
     {
         if (player)
             GiveHarvestPoints(player, OwnedFlags(GetOwned(player)));
+    }
+
+    // Crochet du cœur : montée d'un métier (principal ou secondaire). Renvoie les points à donner.
+    uint32 OnProfessionStep(Player* player, uint16 skillId, uint32 step)
+    {
+        if (!player || !step)
+            return step;
+        SkillLineEntry const* skill = sSkillLineStore.LookupEntry(skillId);
+        if (!skill || (skill->CategoryID != SKILL_CATEGORY_PROFESSION && skill->CategoryID != SKILL_CATEGORY_SECONDARY))
+            return step;
+        if (!(OwnedFlags(GetOwned(player)) & FLAG_PROF_DOUBLE))
+            return step;
+        if (!roll_chance_i(sConfigMgr->GetIntDefault("Azimov.Talents.MetierDouble.Chance", 10)))
+            return step;
+        ChatHandler(player->GetSession()).PSendSysMessage("|cff00ff96Talent Azimov : points de métier doublés !|r");
+        return step * 2;
+    }
+
+    // Métier principal ou secondaire (hors pêche)
+    bool IsCraftProfession(uint32 skillId)
+    {
+        if (skillId == SKILL_FISHING)
+            return false;
+        SkillLineEntry const* skill = sSkillLineStore.LookupEntry(skillId);
+        return skill && (skill->CategoryID == SKILL_CATEGORY_PROFESSION || skill->CategoryID == SKILL_CATEGORY_SECONDARY);
+    }
+
+    // Crochet du cœur : objets créés par un sort. Double la quantité des fabrications de métier.
+    uint32 OnCraftCount(Player* player, SpellInfo const* spellInfo, uint32 count)
+    {
+        if (!player || !spellInfo || !count)
+            return count;
+        if (!(OwnedFlags(GetOwned(player)) & FLAG_CRAFT_DOUBLE))
+            return count;
+
+        bool craft = false;
+        SkillLineAbilityMapBounds bounds = sSpellMgr->GetSkillLineAbilityMapBounds(spellInfo->Id);
+        for (auto itr = bounds.first; itr != bounds.second && !craft; ++itr)
+            craft = IsCraftProfession(itr->second->SkillLine);
+        if (!craft)
+            return count;
+
+        if (!roll_chance_i(sConfigMgr->GetIntDefault("Azimov.Talents.ArtisanInspire.Chance", 10)))
+            return count;
+        ChatHandler(player->GetSession()).PSendSysMessage("|cff00ff96Talent Azimov : fabrication en double !|r");
+        return count * 2;
     }
 
     // Range l'arme d'un emplacement dans les sacs (rien si les sacs sont pleins)
@@ -405,7 +463,7 @@ namespace
             AzTalent const& t = kv.second;
             char head[96];
             snprintf(head, sizeof(head), "D:%u~%u~%u~%u~%u~%u~%u~", t.id, t.path, t.position, t.cost,
-                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining) ? 1 : 0);
+                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining || t.flags || t.harvestKeep) ? 1 : 0);
             Send(player, Utf8Cut(std::string(head) + t.icon + "~" + t.name, 250));
             if (!t.description.empty())
                 Send(player, Utf8Cut("T:" + std::to_string(t.id) + "~" + t.description, 250));
@@ -648,6 +706,8 @@ void AddSC_azimov_talents()
     AzimovBeforeInventoryLoad = &EarlyLoad;
     AzimovGatherNodeLooted = &OnGatherNodeLooted;
     AzimovSkinningLooted = &OnSkinningLooted;
+    AzimovProfessionStep = &OnProfessionStep;
+    AzimovCraftCount = &OnCraftCount;
     new azimov_talents_world();
     new azimov_talents_player();
     new azimov_talents_command();
