@@ -8,7 +8,7 @@
  *   - joueur DPS       -> tank + soigneur + 2 DPS
  * Les sujets suivent le joueur, se battent avec lui (le tank prend les monstres, le soigneur soigne le plus blessé),
  * reviennent après chaque combat s'ils sont morts, et disparaissent quand le joueur quitte le donjon.
- * Les morts tuées par les sujets comptent pour le joueur (butin, expérience, quêtes) : le joueur est leur propriétaire.
+ * Les monstres combattus par les sujets sont attribués au joueur (SetLootRecipient) : butin, expérience et quêtes pour lui.
  *
  * Protocole addon (préfixe AZSUJ, chuchotement à soi-même) :
  *   client -> serveur : "AZSUJ_Q" (liste des donjons), "AZSUJ_E:<donjon>:<rôle>" (entrer ; rôle 0 tank, 1 soigneur, 2 DPS)
@@ -168,8 +168,7 @@ namespace
                 TC_LOG_ERROR("server.azimov", "Sujets : impossible de faire apparaître le sujet %u (SQL des sujets passé ?)", m.second);
                 continue;
             }
-            sujet->SetOwnerGUID(player->GetGUID());
-            sujet->SetCreatorGUID(player->GetGUID());
+            // Pas de SetOwnerGUID / SetCreatorGUID : le client 4.3.4 plante sur un PNJ « invoqué par » le joueur qui n'est pas un familier
             sujet->SetFaction(player->GetFaction());
             sujet->SetLevel(player->getLevel());
             sujet->UpdateLevelDependantStats();
@@ -320,6 +319,7 @@ struct npc_azimov_sujet : public ScriptedAI
 
     void Engage(Unit* enemy)
     {
+        ClaimForOwner(enemy);
         if (me->GetVictim() == enemy)
             return;
         if (IsCaster() || IsHealer())
@@ -329,6 +329,15 @@ struct npc_azimov_sujet : public ScriptedAI
         }
         else
             AttackStart(enemy);
+    }
+
+    // Le monstre revient au joueur (butin, expérience, crédit de quête) même si un sujet frappe en premier
+    void ClaimForOwner(Unit* enemy)
+    {
+        if (Creature* c = enemy->ToCreature())
+            if (!c->hasLootRecipient())
+                if (Player* owner = Owner())
+                    c->SetLootRecipient(owner);
     }
 
     // Le tank attire sur lui tout ce qui frappe le groupe
@@ -429,6 +438,7 @@ struct npc_azimov_sujet : public ScriptedAI
 
         if (IsHealer())
         {
+            ClaimForOwner(enemy);
             if (!HealSomeone(party, 85.0f) && me->IsWithinDistInMap(enemy, 30.0f))
                 me->CastSpell(enemy, SPELL_SMITE, CastSpellExtraArgs().AddSpellBP0(ScaledAmount(me, 1.0f, "Azimov.Sujets.Degats")));
             if (me->GetMotionMaster()->GetCurrentMovementGeneratorType() != FOLLOW_MOTION_TYPE)
