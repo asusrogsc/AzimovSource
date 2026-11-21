@@ -194,7 +194,7 @@ class spell_hallows_end_powder_blast : public AuraScript
         return ValidateSpellInfo({ SPELL_HALLOWS_END_DUMMY_NUKE, SPELL_HALLOWS_END_DREAD_FERTILIZER });
     }
 
-    void HandleProc(AuraEffect* /*aurEff*/, ProcEventInfo& eventInfo)
+    void HandleProc(AuraEffect const* /*aurEff*/, ProcEventInfo& eventInfo)
     {
         GetTarget()->CastSpell(GetTarget(), SPELL_HALLOWS_END_DUMMY_NUKE);
         eventInfo.GetActor()->CastSpell(GetTarget(), SPELL_HALLOWS_END_DREAD_FERTILIZER);

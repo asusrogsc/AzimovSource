@@ -150,7 +150,7 @@ struct npc_tiger_matriarch : public ScriptedAI
         _events.ScheduleEvent(EVENT_NOSUMMON, 50s);
     }
 
-    void IsSummonedBy(WorldObject* summonerWO) override
+    void IsSummonedBy(Unit* summonerWO) override
     {
         Player* summoner = summonerWO->ToPlayer();
         if (!summoner || !summoner->GetVehicle())
@@ -179,7 +179,7 @@ struct npc_tiger_matriarch : public ScriptedAI
         me->DespawnOrUnsummon();
     }
 
-    void DamageTaken(Unit* attacker, uint32& damage, DamageEffectType /*damageType*/, SpellInfo const* /*spellInfo = nullptr*/) override
+    void DamageTaken(Unit* attacker, uint32& damage) override
     {
         if (!attacker || !attacker->IsSummon())
             return;

@@ -131,7 +131,7 @@ class spell_love_is_in_the_air_sample_satisfaction : public AuraScript
 {
     void OnPeriodic(AuraEffect const* /*aurEff*/)
     {
-        if (roll_chance(30))
+        if (roll_chance_i(30))
             Remove();
     }
 
@@ -224,7 +224,7 @@ class spell_love_is_in_the_air_perfume_cologne_immune : public SpellScript
 
     void HandleScript(SpellEffIndex /*effIndex*/)
     {
-        GetCaster()->RemoveAurasDueToSpell(uint32(GetEffectValueAsInt()));
+        GetCaster()->RemoveAurasDueToSpell(uint32(GetEffectValue()));
     }
 
     void Register() override

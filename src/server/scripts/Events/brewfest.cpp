@@ -311,7 +311,7 @@ class spell_brewfest_botm_pink_elekk : public SpellScript
     void HandleAfterCast()
     {
         // TODO: Needs additional research, this spell is most likely used if drunk state is high enough.
-        if (roll_chance(50))
+        if (roll_chance_i(50))
             GetCaster()->CastSpell(GetCaster(), SPELL_BOTM_PINK_ELEKK);
     }
 
