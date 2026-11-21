@@ -52,11 +52,11 @@ namespace
 
     enum AzSujetNpc : uint32
     {
-        NPC_SUJET_TANK   = 9500001,   // Commandant Thorne
-        NPC_SUJET_HEAL   = 9500002,   // Sœur Elyna
-        NPC_SUJET_MELEE  = 9500003,   // Kael l'Ombre
-        NPC_SUJET_CASTER = 9500004,   // Archimage Selvar
-        NPC_SUJET_RANGED = 9500005    // Chaman Torvak
+        NPC_SUJET_TANK   = 990001,    // Commandant Thorne
+        NPC_SUJET_HEAL   = 990002,    // Sœur Elyna
+        NPC_SUJET_MELEE  = 990003,    // Kael l'Ombre
+        NPC_SUJET_CASTER = 990004,    // Archimage Selvar
+        NPC_SUJET_RANGED = 990005     // Chaman Torvak
     };
 
     enum AzSujetSpell : uint32
