@@ -82,6 +82,7 @@ namespace
         int32  haste = 0;         // score de hâte (mêlée, distance, sorts)
         int32  crit = 0;          // score de coup critique (mêlée, distance, sorts)
         float  dmgPct = 0.0f;     // % de dégâts infligés en plus
+        float  leechPct = 0.0f;   // % des dégâts infligés rendus en vie (vol de vie)
         std::string name;
         std::string icon;
         std::string description;
@@ -93,6 +94,7 @@ namespace
 
     struct AppliedStats { int32 versa = 0; int32 refining = 0; int32 haste = 0; int32 crit = 0; };
     std::unordered_map<ObjectGuid::LowType, float> s_dmgPct;                  // personnage -> % de dégâts en plus (protégé par s_lock)
+    std::unordered_map<ObjectGuid::LowType, float> s_leechPct;                // personnage -> % de vol de vie (protégé par s_lock)
     std::unordered_map<ObjectGuid::LowType, AppliedStats> s_stats;           // personnage -> scores déjà appliqués
 
     uint32 CurrencyId()
@@ -121,7 +123,7 @@ namespace
     {
         s_talents.clear();
         QueryResult result = WorldDatabase.Query(
-            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags, harvest_keep, haste, crit, dmg_pct FROM azimov_talent");
+            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags, harvest_keep, haste, crit, dmg_pct, leech_pct FROM azimov_talent");
         if (result)
         {
             do
@@ -145,6 +147,7 @@ namespace
                 t.haste       = f[14].GetInt32();
                 t.crit        = f[15].GetInt32();
                 t.dmgPct      = f[16].GetFloat();
+                t.leechPct    = f[17].GetFloat();
 
                 if (t.spellId && !sSpellMgr->GetSpellInfo(t.spellId))
                 {
@@ -191,7 +194,7 @@ namespace
     {
         std::set<uint32> owned = GetOwned(player);
         int32 versa = 0, refining = 0, haste = 0, crit = 0;
-        float dmgPct = 0.0f;
+        float dmgPct = 0.0f, leechPct = 0.0f;
         for (uint32 id : owned)
             if (AzTalent const* t = GetTalent(id))
             {
@@ -200,6 +203,7 @@ namespace
                 haste += t->haste;
                 crit += t->crit;
                 dmgPct += t->dmgPct;
+                leechPct += t->leechPct;
             }
 
         AppliedStats old;
@@ -215,6 +219,10 @@ namespace
                 s_dmgPct[player->GetGUID().GetCounter()] = dmgPct;
             else
                 s_dmgPct.erase(player->GetGUID().GetCounter());
+            if (leechPct > 0.0f)
+                s_leechPct[player->GetGUID().GetCounter()] = leechPct;
+            else
+                s_leechPct.erase(player->GetGUID().GetCounter());
         }
 
         if (haste != old.haste)
@@ -487,7 +495,7 @@ namespace
             AzTalent const& t = kv.second;
             char head[96];
             snprintf(head, sizeof(head), "D:%u~%u~%u~%u~%u~%u~%u~", t.id, t.path, t.position, t.cost,
-                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining || t.flags || t.harvestKeep || t.haste || t.crit || t.dmgPct > 0.0f) ? 1 : 0);
+                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining || t.flags || t.harvestKeep || t.haste || t.crit || t.dmgPct > 0.0f || t.leechPct > 0.0f) ? 1 : 0);
             Send(player, Utf8Cut(std::string(head) + t.icon + "~" + t.name, 250));
             if (!t.description.empty())
                 Send(player, Utf8Cut("T:" + std::to_string(t.id) + "~" + t.description, 250));
@@ -651,6 +659,7 @@ public:
         s_owned.erase(player->GetGUID().GetCounter());
         s_stats.erase(player->GetGUID().GetCounter());
         s_dmgPct.erase(player->GetGUID().GetCounter());
+        s_leechPct.erase(player->GetGUID().GetCounter());
     }
 
     void OnChat(Player* player, uint32 /*type*/, uint32 lang, std::string& msg, Player* receiver) override
@@ -739,6 +748,23 @@ public:
         std::lock_guard<std::mutex> guard(s_lock);
         auto itr = s_dmgPct.find(attacker->GetGUID().GetCounter());
         return itr != s_dmgPct.end() ? itr->second : 0.0f;
+    }
+
+    // Vol de vie : une part des dégâts réellement infligés revient en vie
+    void OnDamage(Unit* attacker, Unit* victim, uint32& damage) override
+    {
+        if (!damage || !attacker || attacker == victim || attacker->GetTypeId() != TYPEID_PLAYER || !attacker->IsAlive())
+            return;
+        float pct = 0.0f;
+        {
+            std::lock_guard<std::mutex> guard(s_lock);
+            auto itr = s_leechPct.find(attacker->GetGUID().GetCounter());
+            if (itr != s_leechPct.end())
+                pct = itr->second;
+        }
+        if (pct > 0.0f)
+            if (int32 heal = int32(damage * pct / 100.0f))
+                attacker->ModifyHealth(heal);
     }
 
     void ModifyMeleeDamage(Unit* /*target*/, Unit* attacker, uint32& damage) override
