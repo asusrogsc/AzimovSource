@@ -79,6 +79,9 @@ namespace
         int32  refining = 0;
         uint8  flags = 0;
         uint8  harvestKeep = 0;   // % de chances de Moisson abondante (cumulable)
+        int32  haste = 0;         // score de hâte (mêlée, distance, sorts)
+        int32  crit = 0;          // score de coup critique (mêlée, distance, sorts)
+        float  dmgPct = 0.0f;     // % de dégâts infligés en plus
         std::string name;
         std::string icon;
         std::string description;
@@ -88,7 +91,8 @@ namespace
     std::mutex s_lock;
     std::unordered_map<ObjectGuid::LowType, std::set<uint32>> s_owned;        // personnage -> talents
 
-    struct AppliedStats { int32 versa = 0; int32 refining = 0; };
+    struct AppliedStats { int32 versa = 0; int32 refining = 0; int32 haste = 0; int32 crit = 0; };
+    std::unordered_map<ObjectGuid::LowType, float> s_dmgPct;                  // personnage -> % de dégâts en plus (protégé par s_lock)
     std::unordered_map<ObjectGuid::LowType, AppliedStats> s_stats;           // personnage -> scores déjà appliqués
 
     uint32 CurrencyId()
@@ -117,7 +121,7 @@ namespace
     {
         s_talents.clear();
         QueryResult result = WorldDatabase.Query(
-            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags, harvest_keep FROM azimov_talent");
+            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags, harvest_keep, haste, crit, dmg_pct FROM azimov_talent");
         if (result)
         {
             do
@@ -138,6 +142,9 @@ namespace
                 t.refining    = f[11].GetInt32();
                 t.flags       = f[12].GetUInt8();
                 t.harvestKeep = f[13].GetUInt8();
+                t.haste       = f[14].GetInt32();
+                t.crit        = f[15].GetInt32();
+                t.dmgPct      = f[16].GetFloat();
 
                 if (t.spellId && !sSpellMgr->GetSpellInfo(t.spellId))
                 {
@@ -183,12 +190,16 @@ namespace
     void ApplyStats(Player* player)
     {
         std::set<uint32> owned = GetOwned(player);
-        int32 versa = 0, refining = 0;
+        int32 versa = 0, refining = 0, haste = 0, crit = 0;
+        float dmgPct = 0.0f;
         for (uint32 id : owned)
             if (AzTalent const* t = GetTalent(id))
             {
                 versa += t->versa;
                 refining += t->refining;
+                haste += t->haste;
+                crit += t->crit;
+                dmgPct += t->dmgPct;
             }
 
         AppliedStats old;
@@ -198,7 +209,20 @@ namespace
             old = entry;
             entry.versa = versa;
             entry.refining = refining;
+            entry.haste = haste;
+            entry.crit = crit;
+            if (dmgPct > 0.0f)
+                s_dmgPct[player->GetGUID().GetCounter()] = dmgPct;
+            else
+                s_dmgPct.erase(player->GetGUID().GetCounter());
         }
+
+        if (haste != old.haste)
+            for (CombatRating cr : { CR_HASTE_MELEE, CR_HASTE_RANGED, CR_HASTE_SPELL })
+                player->ApplyRatingMod(cr, haste - old.haste, true);
+        if (crit != old.crit)
+            for (CombatRating cr : { CR_CRIT_MELEE, CR_CRIT_RANGED, CR_CRIT_SPELL })
+                player->ApplyRatingMod(cr, crit - old.crit, true);
 
         if (versa != old.versa)
             player->ApplyCustomVersatilityRating(versa - old.versa, true);
@@ -463,7 +487,7 @@ namespace
             AzTalent const& t = kv.second;
             char head[96];
             snprintf(head, sizeof(head), "D:%u~%u~%u~%u~%u~%u~%u~", t.id, t.path, t.position, t.cost,
-                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining || t.flags || t.harvestKeep) ? 1 : 0);
+                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining || t.flags || t.harvestKeep || t.haste || t.crit || t.dmgPct > 0.0f) ? 1 : 0);
             Send(player, Utf8Cut(std::string(head) + t.icon + "~" + t.name, 250));
             if (!t.description.empty())
                 Send(player, Utf8Cut("T:" + std::to_string(t.id) + "~" + t.description, 250));
@@ -626,6 +650,7 @@ public:
         std::lock_guard<std::mutex> guard(s_lock);
         s_owned.erase(player->GetGUID().GetCounter());
         s_stats.erase(player->GetGUID().GetCounter());
+        s_dmgPct.erase(player->GetGUID().GetCounter());
     }
 
     void OnChat(Player* player, uint32 /*type*/, uint32 lang, std::string& msg, Player* receiver) override
@@ -701,6 +726,41 @@ public:
     }
 };
 
+// Dégâts infligés en plus (talents « +X % de dégâts »)
+class azimov_talents_damage : public UnitScript
+{
+public:
+    azimov_talents_damage() : UnitScript("azimov_talents_damage") { }
+
+    static float Bonus(Unit* attacker)
+    {
+        if (!attacker || attacker->GetTypeId() != TYPEID_PLAYER)
+            return 0.0f;
+        std::lock_guard<std::mutex> guard(s_lock);
+        auto itr = s_dmgPct.find(attacker->GetGUID().GetCounter());
+        return itr != s_dmgPct.end() ? itr->second : 0.0f;
+    }
+
+    void ModifyMeleeDamage(Unit* /*target*/, Unit* attacker, uint32& damage) override
+    {
+        if (float pct = Bonus(attacker))
+            damage = uint32(damage * (1.0f + pct / 100.0f));
+    }
+
+    void ModifySpellDamageTaken(Unit* /*target*/, Unit* attacker, int32& damage) override
+    {
+        if (damage > 0)
+            if (float pct = Bonus(attacker))
+                damage = int32(damage * (1.0f + pct / 100.0f));
+    }
+
+    void ModifyPeriodicDamageAurasTick(Unit* /*target*/, Unit* attacker, uint32& damage) override
+    {
+        if (float pct = Bonus(attacker))
+            damage = uint32(damage * (1.0f + pct / 100.0f));
+    }
+};
+
 void AddSC_azimov_talents()
 {
     AzimovBeforeInventoryLoad = &EarlyLoad;
@@ -711,4 +771,5 @@ void AddSC_azimov_talents()
     new azimov_talents_world();
     new azimov_talents_player();
     new azimov_talents_command();
+    new azimov_talents_damage();
 }
