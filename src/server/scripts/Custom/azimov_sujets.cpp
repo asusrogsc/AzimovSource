@@ -40,6 +40,7 @@
 #include "TemporarySummon.h"
 #include "ThreatManager.h"
 #include <algorithm>
+#include <cmath>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -71,7 +72,8 @@ namespace
         SPELL_FROSTBOLT = 116,    // Éclair de givre (dégâts imposés)
         SPELL_LIGHTNING = 403,    // Éclair (dégâts imposés)
         SPELL_SMITE     = 585,    // Châtiment (dégâts imposés)
-        SPELL_DRINK     = 430     // Boisson (visuel : le sujet s'assoit et boit)
+        SPELL_DRINK     = 430,    // Boisson (visuel : le sujet s'assoit et boit)
+        SPELL_REZ       = 2006    // Résurrection (le joueur reçoit la demande habituelle)
     };
 
     struct AzSujetGroup
@@ -394,6 +396,21 @@ struct npc_azimov_sujet : public ScriptedAI
     {
         if (me->GetVictim())
             me->AttackStop();
+
+        // Ascenseur, téléporteur, chute : trop loin ou trop haut/bas -> on rejoint le joueur
+        // (pas pendant qu'il est encore sur l'ascenseur en mouvement, ni pendant un combat)
+        if (!owner->GetTransport() && !me->IsInCombat() && !owner->IsInCombat())
+        {
+            float dz = std::fabs(me->GetPositionZ() - owner->GetPositionZ());
+            if (me->GetDistance(owner) > 40.0f || (dz > 8.0f && me->GetDistance2d(owner) < 40.0f))
+            {
+                Position pos = owner->GetPosition();
+                owner->MovePositionToFirstCollision(pos, 2.5f, AngleFor(me->GetEntry()));
+                me->NearTeleportTo(pos.GetPositionX(), pos.GetPositionY(), pos.GetPositionZ(), owner->GetOrientation());
+                me->GetMotionMaster()->Clear();
+            }
+        }
+
         if (me->GetMotionMaster()->GetCurrentMovementGeneratorType() != FOLLOW_MOTION_TYPE)
             me->GetMotionMaster()->MoveFollow(owner, 2.5f, AngleFor(me->GetEntry()));
     }
@@ -499,7 +516,18 @@ struct npc_azimov_sujet : public ScriptedAI
 
         if (!owner->IsAlive())
         {
+            if (me->HasUnitState(UNIT_STATE_CASTING))
+                return;   // résurrection en cours : on ne bouge pas
             FollowOwner(owner);
+            // Le groupe a péri mais la soigneuse est debout : elle relève le joueur une fois le combat fini
+            if (IsHealer() && !me->IsInCombat() && !me->HasUnitState(UNIT_STATE_CASTING) && !owner->IsResurrectRequested()
+                && me->IsWithinDistInMap(owner, 30.0f) && me->IsWithinLOSInMap(owner))
+            {
+                me->GetMotionMaster()->Clear();
+                me->StopMoving();
+                me->SetFacingToObject(owner);
+                me->CastSpell(owner, SPELL_REZ, CastSpellExtraArgs(TriggerCastFlags(TRIGGERED_IGNORE_POWER_COST | TRIGGERED_IGNORE_REAGENT_COST)));
+            }
             return;
         }
 
@@ -595,8 +623,10 @@ public:
                 itr->second.pending = false;
                 summon = true;
             }
-            else if (!itr->second.pending)
-                s_groups.erase(itr);   // sorti du donjon : fin du groupe de sujets
+            else if (!itr->second.pending && player->IsAlive() && !player->HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_GHOST))
+                s_groups.erase(itr);   // sorti du donjon vivant : fin du groupe de sujets
+            // Mort et esprit libéré (cimetière hors du donjon) : le groupe est gardé,
+            // les sujets reviennent dès que le joueur rentre dans le donjon.
         }
         if (summon)
             EnsureFollowers(player);
