@@ -123,6 +123,7 @@ namespace
         uint8  gatherRestore = 0; // % de vie / mana / énergie rendus à chaque récolte (cumulable)
         uint8  lightProc = 0;     // 1 = Frappe de lumière (cible), 2 = Lumière éclatante (5 ennemis)
         float  allStatsPct = 0.0f; // % en plus sur toutes les stats (caractéristiques, scores, Polyvalence, Raffinage)
+        uint8  bookPct = 0;       // maj15 : % de chances en plus de trouver un livre de métier (cumulable)
         std::string name;
         std::string icon;
         std::string description;
@@ -165,7 +166,7 @@ namespace
     {
         s_talents.clear();
         QueryResult result = WorldDatabase.Query(
-            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags, harvest_keep, haste, crit, dmg_pct, leech_pct, power_pct, gather_restore, light_proc, all_stats_pct FROM azimov_talent");
+            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags, harvest_keep, haste, crit, dmg_pct, leech_pct, power_pct, gather_restore, light_proc, all_stats_pct, book_pct FROM azimov_talent");
         if (result)
         {
             do
@@ -194,6 +195,7 @@ namespace
                 t.gatherRestore = f[19].GetUInt8();
                 t.lightProc   = f[20].GetUInt8();
                 t.allStatsPct = f[21].GetFloat();
+                t.bookPct     = f[22].GetUInt8();
 
                 if (t.spellId && !sSpellMgr->GetSpellInfo(t.spellId))
                 {
@@ -365,9 +367,14 @@ namespace
     }
 
     // Bibliothécaire (Récolte 40) : chance de trouver un livre de métier au hasard
-    void DropBook(Player* player, uint8 flags)
+    // maj15 : + somme des book_pct possédés (Récolte 23 / 27, actifs même avant Bibliothécaire, comme Glaneur)
+    void DropBook(Player* player, std::set<uint32> const& owned, uint8 flags)
     {
-        if (!(flags & FLAG_BOOK_DROP) || !roll_chance_i(sConfigMgr->GetIntDefault("Azimov.Talents.Livres.Chance", 10)))
+        int32 chance = (flags & FLAG_BOOK_DROP) ? sConfigMgr->GetIntDefault("Azimov.Talents.Livres.Chance", 10) : 0;
+        for (uint32 id : owned)
+            if (AzTalent const* t = GetTalent(id))
+                chance += t->bookPct;
+        if (chance <= 0 || !roll_chance_i(chance))
             return;
         AzBook const& book = BOOKS[urand(0, uint32(std::size(BOOKS)) - 1)];
         if (player->AddItem(book.item, 1))
@@ -382,7 +389,7 @@ namespace
         uint8 flags = OwnedFlags(owned);
         GiveHarvestPoints(player, flags);
         RestoreOnGather(player, owned);
-        DropBook(player, flags);
+        DropBook(player, owned, flags);
         if (flags & FLAG_EXPERT_REFINING)
             ApplyStats(player); // le métier a pu monter pendant la récolte
 
@@ -422,7 +429,7 @@ namespace
         uint8 flags = OwnedFlags(owned);
         GiveHarvestPoints(player, flags);
         RestoreOnGather(player, owned);
-        DropBook(player, flags);
+        DropBook(player, owned, flags);
         if (flags & FLAG_EXPERT_REFINING)
             ApplyStats(player); // le dépeçage a pu monter
     }
@@ -622,7 +629,7 @@ namespace
             AzTalent const& t = kv.second;
             char head[96];
             snprintf(head, sizeof(head), "D:%u~%u~%u~%u~%u~%u~%u~", t.id, t.path, t.position, t.cost,
-                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining || t.flags || t.harvestKeep || t.haste || t.crit || t.dmgPct > 0.0f || t.leechPct > 0.0f || t.powerPct > 0.0f || t.gatherRestore || t.lightProc || t.allStatsPct > 0.0f) ? 1 : 0);
+                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining || t.flags || t.harvestKeep || t.haste || t.crit || t.dmgPct > 0.0f || t.leechPct > 0.0f || t.powerPct > 0.0f || t.gatherRestore || t.lightProc || t.allStatsPct > 0.0f || t.bookPct) ? 1 : 0);
             Send(player, Utf8Cut(std::string(head) + t.icon + "~" + t.name, 250));
             if (!t.description.empty())
                 Send(player, Utf8Cut("T:" + std::to_string(t.id) + "~" + t.description, 250));
