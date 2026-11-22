@@ -42,6 +42,7 @@
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "WorldSession.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -62,6 +63,7 @@ namespace
     constexpr uint8  FLAG_HARVEST_POINTS = 0x8;   // Azimov Farming : chaque récolte donne de la Puissance Azimov
     constexpr uint8  FLAG_PROF_DOUBLE    = 0x10;  // Apprentissage éclair : chance de points de métier doublés
     constexpr uint8  FLAG_CRAFT_DOUBLE   = 0x20;  // Artisan inspiré : chance d'objet fabriqué en double
+    constexpr uint8  FLAG_EXPERT_REFINING = 0x40; // Raffinage d'expert : +1 Raffinage par 10 points du meilleur métier de récolte
     constexpr uint32 SPELL_TITAN_GRIP_PENALTY = 49152;
     constexpr uint32 SPELL_STAVES   = 227;
     constexpr uint32 SPELL_POLEARMS = 200;
@@ -84,6 +86,7 @@ namespace
         float  dmgPct = 0.0f;     // % de dégâts infligés en plus
         float  leechPct = 0.0f;   // % des dégâts infligés rendus en vie (vol de vie)
         float  powerPct = 0.0f;   // % de Puissance Azimov gagnée en plus (toute source)
+        uint8  gatherRestore = 0; // % de vie / mana / énergie rendus à chaque récolte (cumulable)
         std::string name;
         std::string icon;
         std::string description;
@@ -124,7 +127,7 @@ namespace
     {
         s_talents.clear();
         QueryResult result = WorldDatabase.Query(
-            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags, harvest_keep, haste, crit, dmg_pct, leech_pct, power_pct FROM azimov_talent");
+            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags, harvest_keep, haste, crit, dmg_pct, leech_pct, power_pct, gather_restore FROM azimov_talent");
         if (result)
         {
             do
@@ -150,6 +153,7 @@ namespace
                 t.dmgPct      = f[16].GetFloat();
                 t.leechPct    = f[17].GetFloat();
                 t.powerPct    = f[18].GetFloat();
+                t.gatherRestore = f[19].GetUInt8();
 
                 if (t.spellId && !sSpellMgr->GetSpellInfo(t.spellId))
                 {
@@ -197,9 +201,11 @@ namespace
         std::set<uint32> owned = GetOwned(player);
         int32 versa = 0, refining = 0, haste = 0, crit = 0;
         float dmgPct = 0.0f, leechPct = 0.0f;
+        uint8 flags = 0;
         for (uint32 id : owned)
             if (AzTalent const* t = GetTalent(id))
             {
+                flags |= t->flags;
                 versa += t->versa;
                 refining += t->refining;
                 haste += t->haste;
@@ -207,6 +213,10 @@ namespace
                 dmgPct += t->dmgPct;
                 leechPct += t->leechPct;
             }
+
+        // Raffinage d'expert : meilleur métier de récolte (herboristerie, minage, dépeçage) / 10
+        if (flags & FLAG_EXPERT_REFINING)
+            refining += int32(std::max({ player->GetSkillValue(SKILL_HERBALISM), player->GetSkillValue(SKILL_MINING), player->GetSkillValue(SKILL_SKINNING) }) / 10);
 
         AppliedStats old;
         {
@@ -279,6 +289,24 @@ namespace
     }
 
     // Crochet du cœur : herbe / filon entièrement ramassé. true = le point ne s'épuise pas.
+    // Second souffle du récolteur : rend un % de vie, de mana et de la ressource principale (énergie, rage…)
+    void RestoreOnGather(Player* player, std::set<uint32> const& owned)
+    {
+        int32 pct = 0;
+        for (uint32 id : owned)
+            if (AzTalent const* t = GetTalent(id))
+                pct += t->gatherRestore;
+        if (pct <= 0 || !player->IsAlive())
+            return;
+        player->ModifyHealth(int32(player->CountPctFromMaxHealth(pct)));
+        if (int32 maxMana = player->GetMaxPower(POWER_MANA))
+            player->ModifyPower(POWER_MANA, CalculatePct(maxMana, pct));
+        PowerType power = player->GetPowerType();
+        if (power != POWER_MANA)
+            if (int32 maxPower = player->GetMaxPower(power))
+                player->ModifyPower(power, std::max(1, CalculatePct(maxPower, pct)));
+    }
+
     bool OnGatherNodeLooted(Player* player, GameObject* go)
     {
         if (!player || !IsGatherNode(go))
@@ -286,6 +314,9 @@ namespace
         std::set<uint32> owned = GetOwned(player);
         uint8 flags = OwnedFlags(owned);
         GiveHarvestPoints(player, flags);
+        RestoreOnGather(player, owned);
+        if (flags & FLAG_EXPERT_REFINING)
+            ApplyStats(player); // le métier a pu monter pendant la récolte
 
         // Moisson abondante : héroïque (config, 10 %) + petits talents (+1 % chacun…)
         int32 chance = (flags & FLAG_HARVEST_KEEP) ? sConfigMgr->GetIntDefault("Azimov.Talents.Moisson.Chance", 10) : 0;
@@ -317,8 +348,14 @@ namespace
     // Crochet du cœur : dépeçage entièrement ramassé
     void OnSkinningLooted(Player* player, Creature* /*creature*/)
     {
-        if (player)
-            GiveHarvestPoints(player, OwnedFlags(GetOwned(player)));
+        if (!player)
+            return;
+        std::set<uint32> owned = GetOwned(player);
+        uint8 flags = OwnedFlags(owned);
+        GiveHarvestPoints(player, flags);
+        RestoreOnGather(player, owned);
+        if (flags & FLAG_EXPERT_REFINING)
+            ApplyStats(player); // le dépeçage a pu monter
     }
 
     // Crochet du cœur : montée d'un métier (principal ou secondaire). Renvoie les points à donner.
@@ -516,7 +553,7 @@ namespace
             AzTalent const& t = kv.second;
             char head[96];
             snprintf(head, sizeof(head), "D:%u~%u~%u~%u~%u~%u~%u~", t.id, t.path, t.position, t.cost,
-                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining || t.flags || t.harvestKeep || t.haste || t.crit || t.dmgPct > 0.0f || t.leechPct > 0.0f || t.powerPct > 0.0f) ? 1 : 0);
+                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining || t.flags || t.harvestKeep || t.haste || t.crit || t.dmgPct > 0.0f || t.leechPct > 0.0f || t.powerPct > 0.0f || t.gatherRestore) ? 1 : 0);
             Send(player, Utf8Cut(std::string(head) + t.icon + "~" + t.name, 250));
             if (!t.description.empty())
                 Send(player, Utf8Cut("T:" + std::to_string(t.id) + "~" + t.description, 250));
