@@ -5734,7 +5734,7 @@ uint16 Player::GetPureMaxSkillValue(uint32 skill) const
         return 0;
 
     SkillStatusMap::const_iterator itr = mSkillStatus.find(skill);
-    if (itr == mSkillStatus.end() || itr->second.uState == SKILL_DELETED || GetSkillRank(itr->second.pos))
+    if (itr == mSkillStatus.end() || itr->second.uState == SKILL_DELETED || !GetSkillRank(itr->second.pos)) // Azimov : « ! » manquant (renvoyait toujours 0)
         return 0;
 
     uint16 field = itr->second.pos / 2;
