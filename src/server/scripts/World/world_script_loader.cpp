@@ -31,6 +31,7 @@ void AddSC_achievement_scripts();
 void AddSC_action_ip_logger();
 void AddSC_duel_reset();
 void AddSC_emerald_dragons();
+void AddSC_condition_scripts();
 void AddSC_world_map_scripts();
 // player
 void AddSC_chat_log();
@@ -58,4 +59,5 @@ void AddWorldScripts()
         AddSC_action_ip_logger(); // location: scripts\World\action_ip_logger.cpp
     AddSC_duel_reset();
     AddSC_emerald_dragons();
+    AddSC_condition_scripts();
 }
