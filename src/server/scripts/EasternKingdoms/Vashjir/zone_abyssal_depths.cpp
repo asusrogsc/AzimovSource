@@ -16,6 +16,7 @@
  */
 
 #include "ScriptMgr.h"
+#include "Spell.h"
 #include "Creature.h"
 #include "MotionMaster.h"
 #include "Player.h"
@@ -79,9 +80,9 @@ struct npc_abyssal_depths_whirlpool_vehicle : public ScriptedAI
         }
     }
 
-    void OnSpellCast(SpellInfo const* spellInfo) override
+    void OnSpellCastFinished(SpellInfo const* spellInfo, SpellFinishReason reason) override
     {
-        if (spellInfo->Id == Spells::TeleportUnderWhirlpool)
+        if (reason == SPELL_FINISHED_SUCCESSFUL_CAST && spellInfo->Id == Spells::TeleportUnderWhirlpool)
             me->DespawnOrUnsummon();
     }
 

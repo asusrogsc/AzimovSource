@@ -35,20 +35,20 @@ class spell_vashjir_sea_legs_aura : public AuraScript
         return ValidateSpellInfo({ Spells::SeaLegsAura });
     }
 
-    static void CalcPeriodic(AuraScript const&, AuraEffect const* /*aurEff*/, bool& isPeriodic, int32& amplitude)
+    void CalcPeriodic(AuraEffect const* /*aurEff*/, bool& isPeriodic, int32& amplitude)
     {
         isPeriodic = true;
         amplitude = 500;
     }
 
-    void OnUpdate(AuraEffect const* /*aurEff*/) const
+    void OnUpdate(AuraEffect const* /*aurEff*/)
     {
         Unit* target = GetTarget();
         if (target->IsInWater())
             target->CastSpell(target, Spells::SeaLegsAura, TRIGGERED_IGNORE_CAST_IN_PROGRESS);
     }
 
-    void OnRemove(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/) const
+    void OnRemove(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
     {
         GetTarget()->RemoveAura(Spells::SeaLegsAura);
     }
