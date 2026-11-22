@@ -406,13 +406,13 @@ struct npc_azimov_sujet : public ScriptedAI
         // (pas pendant qu'il est encore sur l'ascenseur en mouvement, ni pendant un combat)
         // Il faut que l'écart dure 3 s (le sujet n'arrive pas à suivre) : un simple dénivelé ou un joueur
         // qui court devant ne doit pas le faire clignoter (une téléportation = disparition/réapparition à l'écran)
-        bool far = false;
+        bool tooFar = false;
         if (!owner->GetTransport() && !me->IsInCombat() && !owner->IsInCombat())
         {
             float dz = std::fabs(me->GetPositionZ() - owner->GetPositionZ());
-            far = me->GetDistance(owner) > 60.0f || (dz > 15.0f && me->GetDistance2d(owner) < 25.0f);
+            tooFar = me->GetDistance(owner) > 60.0f || (dz > 15.0f && me->GetDistance2d(owner) < 25.0f);
         }
-        _farTime = far ? _farTime + 500 : 0;
+        _farTime = tooFar ? _farTime + 500 : 0;
         if (_farTime >= 3000)
         {
             _farTime = 0;
