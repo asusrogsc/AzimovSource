@@ -152,6 +152,7 @@ uint64 const MAX_MONEY_AMOUNT = 9999999999ULL;
 
 void (*AzimovBeforeInventoryLoad)(Player* player) = nullptr;
 uint32 (*AzimovProfessionStep)(Player* player, uint16 skillId, uint32 step) = nullptr;
+int32 (*AzimovCurrencyGain)(Player* player, uint32 currencyId, int32 amount) = nullptr;
 
 Player::Player(WorldSession* session) : Unit(true),
     _characterFlags(CHARACTER_FLAG_NONE), _characterFlags2(CHARACTER_FLAG_2_NONE)
@@ -6770,6 +6771,10 @@ void Player::ModifyCurrency(uint32 currencyId, int32 amount, bool supressChatLog
 
     if (!ignoreModifiersAndTracking)
         amount *= GetTotalAuraMultiplierByMiscValue(SPELL_AURA_MOD_CURRENCY_GAIN, currencyId);
+
+    // Azimov : bonus de monnaie des talents Azimov (pas sur les remboursements ni les commandes)
+    if (!ignoreModifiersAndTracking && amount > 0 && AzimovCurrencyGain)
+        amount = AzimovCurrencyGain(this, currencyId, amount);
 
     PlayerCurrency* playerCurrency = nullptr;
     PlayerCurrenciesMap::iterator itr = _currencyStorage.find(currencyId);

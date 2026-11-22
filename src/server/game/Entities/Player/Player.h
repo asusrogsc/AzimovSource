@@ -1006,6 +1006,9 @@ TC_GAME_API extern uint32 (*AzimovProfessionStep)(Player* player, uint16 skillId
 class SpellInfo;
 TC_GAME_API extern uint32 (*AzimovCraftCount)(Player* player, SpellInfo const* spellInfo, uint32 count);
 
+// Azimov : gain de monnaie (talents Azimov : bonus de Puissance Azimov), renvoie la quantité à donner.
+TC_GAME_API extern int32 (*AzimovCurrencyGain)(Player* player, uint32 currencyId, int32 amount);
+
 class TC_GAME_API Player : public Unit, public GridObject<Player>
 {
     friend class WorldSession;

@@ -83,6 +83,7 @@ namespace
         int32  crit = 0;          // score de coup critique (mêlée, distance, sorts)
         float  dmgPct = 0.0f;     // % de dégâts infligés en plus
         float  leechPct = 0.0f;   // % des dégâts infligés rendus en vie (vol de vie)
+        float  powerPct = 0.0f;   // % de Puissance Azimov gagnée en plus (toute source)
         std::string name;
         std::string icon;
         std::string description;
@@ -123,7 +124,7 @@ namespace
     {
         s_talents.clear();
         QueryResult result = WorldDatabase.Query(
-            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags, harvest_keep, haste, crit, dmg_pct, leech_pct FROM azimov_talent");
+            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags, harvest_keep, haste, crit, dmg_pct, leech_pct, power_pct FROM azimov_talent");
         if (result)
         {
             do
@@ -148,6 +149,7 @@ namespace
                 t.crit        = f[15].GetInt32();
                 t.dmgPct      = f[16].GetFloat();
                 t.leechPct    = f[17].GetFloat();
+                t.powerPct    = f[18].GetFloat();
 
                 if (t.spellId && !sSpellMgr->GetSpellInfo(t.spellId))
                 {
@@ -291,6 +293,25 @@ namespace
             if (AzTalent const* t = GetTalent(id))
                 chance += t->harvestKeep;
         return chance > 0 && roll_chance_i(chance);
+    }
+
+    // Crochet du cœur : Puissance Azimov gagnée (toute source, hors remboursement / commande).
+    // Bonus = gain x % des talents ; la partie décimale se joue aux dés (1 point à 5 % = 5 % de chances de +1).
+    int32 OnCurrencyGain(Player* player, uint32 currencyId, int32 amount)
+    {
+        if (!player || amount <= 0 || currencyId != CurrencyId())
+            return amount;
+        float pct = 0.0f;
+        for (uint32 id : GetOwned(player))
+            if (AzTalent const* t = GetTalent(id))
+                pct += t->powerPct;
+        if (pct <= 0.0f)
+            return amount;
+        float bonus = float(amount) * pct / 100.0f;
+        int32 whole = int32(bonus);
+        if (roll_chance_f((bonus - float(whole)) * 100.0f))
+            ++whole;
+        return amount + whole;
     }
 
     // Crochet du cœur : dépeçage entièrement ramassé
@@ -495,7 +516,7 @@ namespace
             AzTalent const& t = kv.second;
             char head[96];
             snprintf(head, sizeof(head), "D:%u~%u~%u~%u~%u~%u~%u~", t.id, t.path, t.position, t.cost,
-                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining || t.flags || t.harvestKeep || t.haste || t.crit || t.dmgPct > 0.0f || t.leechPct > 0.0f) ? 1 : 0);
+                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining || t.flags || t.harvestKeep || t.haste || t.crit || t.dmgPct > 0.0f || t.leechPct > 0.0f || t.powerPct > 0.0f) ? 1 : 0);
             Send(player, Utf8Cut(std::string(head) + t.icon + "~" + t.name, 250));
             if (!t.description.empty())
                 Send(player, Utf8Cut("T:" + std::to_string(t.id) + "~" + t.description, 250));
@@ -600,7 +621,7 @@ namespace
         }
 
         if (refund)
-            player->ModifyCurrency(CurrencyId(), int32(refund));
+            player->ModifyCurrency(CurrencyId(), int32(refund), false, true); // remboursement : sans bonus de Puissance
         ApplyStats(player);
         ApplyFlags(player);
 
@@ -794,6 +815,7 @@ void AddSC_azimov_talents()
     AzimovSkinningLooted = &OnSkinningLooted;
     AzimovProfessionStep = &OnProfessionStep;
     AzimovCraftCount = &OnCraftCount;
+    AzimovCurrencyGain = &OnCurrencyGain;
     new azimov_talents_world();
     new azimov_talents_player();
     new azimov_talents_command();
