@@ -71,6 +71,7 @@ namespace
     constexpr uint8  FLAG_CRAFT_DOUBLE   = 0x20;  // Artisan inspiré : chance d'objet fabriqué en double
     constexpr uint8  FLAG_EXPERT_REFINING = 0x40; // Raffinage d'expert : +1 Raffinage par 10 points du meilleur métier de récolte
     constexpr uint32 SPELL_TITAN_GRIP_PENALTY = 49152;
+    constexpr uint32 SPELL_LEECH_LOG = 20004;      // « Vol de vie » : nom affiché pour le soin du talent dans le journal de combat
     constexpr uint32 SPELL_LIGHT_STRIKE = 9734;    // Châtiment sacré (dégâts de Sacré, visuel des talents de lumière)
     constexpr uint32 SPELL_STAVES   = 227;
     constexpr uint32 SPELL_POLEARMS = 200;
@@ -839,8 +840,17 @@ public:
                 pct = itr->second;
         }
         if (pct > 0.0f)
-            if (int32 heal = int32(damage * pct / 100.0f))
-                attacker->ModifyHealth(heal);
+            if (uint32 heal = uint32(damage * pct / 100.0f))
+            {
+                // Soin passé par un sort (« Vol de vie ») : visible dans le journal de combat, donc dans Skada / Recount
+                if (SpellInfo const* leech = sSpellMgr->GetSpellInfo(SPELL_LEECH_LOG))
+                {
+                    HealInfo healInfo(attacker, attacker, heal, leech, leech->GetSchoolMask());
+                    attacker->HealBySpell(healInfo);
+                }
+                else
+                    attacker->ModifyHealth(int32(heal));
+            }
 
         LightStrike(attacker->ToPlayer(), victim);
     }

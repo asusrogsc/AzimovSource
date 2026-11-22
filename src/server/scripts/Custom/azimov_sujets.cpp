@@ -21,6 +21,7 @@
  *     Azimov.Sujets.<Role>.Vie         : points de vie
  *     Azimov.Sujets.<Role>.Degats      : tous les dégâts infligés (mêlée, sorts, effets périodiques)
  *     Azimov.Sujets.<Role>.DegatsSubis : dégâts reçus
+ *   Azimov.Sujets.Skada (0) : essai, sujets « créés par » le joueur pour apparaître dans Skada / Recount
  */
 
 #include "ScriptMgr.h"
@@ -201,7 +202,11 @@ namespace
                 TC_LOG_ERROR("server.azimov", "Sujets : impossible de faire apparaître le sujet %u (SQL des sujets passé ?)", m.second);
                 continue;
             }
-            // Pas de SetOwnerGUID / SetCreatorGUID : le client 4.3.4 plante sur un PNJ « invoqué par » le joueur qui n'est pas un familier
+            // Pas de SetOwnerGUID : le client 4.3.4 plante sur un PNJ « invoqué par » le joueur qui n'est pas un familier.
+            // Option d'essai Azimov.Sujets.Skada = 1 : « créé par » le joueur seulement (comme un totem ou un gardien),
+            // pour que le journal de combat marque le sujet comme « à moi » et que Skada / Recount compte ses dégâts et soins.
+            if (sConfigMgr->GetBoolDefault("Azimov.Sujets.Skada", false))
+                sujet->SetCreatorGUID(player->GetGUID());
             sujet->SetFaction(player->GetFaction());
             sujet->SetLevel(player->getLevel());
             sujet->UpdateLevelDependantStats();
