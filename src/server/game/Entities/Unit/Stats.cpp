@@ -121,6 +121,8 @@ void Stats::UpdateTotalStatMultiplier(StatType statType)
         for (StatType stat : AllPrimaryStats)
         {
             float multiplier = getAuraMultiplierForStatType(SPELL_AURA_MOD_TOTAL_STAT_PERCENTAGE, stat);
+            if (Player const* player = _owner->ToPlayer())
+                multiplier *= player->GetAzimovAllStatsMult();   // Azimov : talents « toutes les stats »
             _primaryStatData[AsUnderlyingType(stat)].TotalPctMultiplier = multiplier;
             updateStat(stat);
         }
@@ -128,6 +130,8 @@ void Stats::UpdateTotalStatMultiplier(StatType statType)
     else
     {
         float multiplier = getAuraMultiplierForStatType(SPELL_AURA_MOD_TOTAL_STAT_PERCENTAGE, statType);
+        if (Player const* player = _owner->ToPlayer())
+            multiplier *= player->GetAzimovAllStatsMult();   // Azimov : talents « toutes les stats »
         _primaryStatData[AsUnderlyingType(statType)].TotalPctMultiplier = multiplier;
         updateStat(statType);
     }

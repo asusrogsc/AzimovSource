@@ -1779,8 +1779,11 @@ class TC_GAME_API Player : public Unit, public GridObject<Player>
         void ApplyRatingMod(CombatRating cr, int32 value, bool apply);
 
         // CustomStats : Polyvalence / Raffinage
-        int32 GetCustomVersatilityRating() const { return std::max(0, m_customVersatilityRating); }
-        int32 GetCustomRefiningRating() const { return std::max(0, m_customRefiningRating); }
+        int32 GetCustomVersatilityRating() const { return int32(std::max(0, m_customVersatilityRating) * m_azimovAllStatsMult); }
+        int32 GetCustomRefiningRating() const { return int32(std::max(0, m_customRefiningRating) * m_azimovAllStatsMult); }
+        // Azimov : multiplicateur de toutes les stats (talents Azimov) : caractéristiques, scores, Polyvalence, Raffinage
+        float GetAzimovAllStatsMult() const { return m_azimovAllStatsMult; }
+        void SetAzimovAllStatsMult(float mult) { m_azimovAllStatsMult = mult; }
         void ApplyCustomVersatilityRating(int32 value, bool apply) { m_customVersatilityRating += apply ? value : -value; }
         void ApplyCustomRefiningRating(int32 value, bool apply) { m_customRefiningRating += apply ? value : -value; }
         void UpdateRating(CombatRating cr);
@@ -2726,6 +2729,7 @@ class TC_GAME_API Player : public Unit, public GridObject<Player>
     private:
         int32 m_customVersatilityRating = 0;
         int32 m_customRefiningRating = 0;
+        float m_azimovAllStatsMult = 1.0f;
         // internal common parts for CanStore/StoreItem functions
         InventoryResult CanStoreItem_InSpecificSlot(uint8 bag, uint8 slot, ItemPosCountVec& dest, ItemTemplate const* pProto, uint32& count, bool swap, Item* pSrcItem) const;
         InventoryResult CanStoreItem_InBag(uint8 bag, ItemPosCountVec& dest, ItemTemplate const* pProto, uint32& count, bool merge, bool non_specialized, Item* pSrcItem, uint8 skip_bag, uint8 skip_slot) const;

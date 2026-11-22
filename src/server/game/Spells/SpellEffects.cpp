@@ -1743,7 +1743,7 @@ void Spell::EffectOpenLock(SpellEffIndex effIndex)
     ObjectGuid guid;
 
     // Get lockId
-    GameObjectTemplate const* goInfo;
+    GameObjectTemplate const* goInfo = nullptr;
     if (gameObjTarget)
     {
         goInfo = gameObjTarget->GetGOInfo();
@@ -1833,7 +1833,8 @@ void Spell::EffectOpenLock(SpellEffIndex effIndex)
                         player->UpdateGatherSkill(skillId, pureSkillValue, reqSkillValue);
 
             // Some chests do grant experience when opened
-            if (goInfo->type == GAMEOBJECT_TYPE_CHEST)
+            // Azimov : goInfo est nul quand on crochète un objet du sac (coffret) -> plantage du serveur
+            if (goInfo && goInfo->type == GAMEOBJECT_TYPE_CHEST)
             {
                 // Chests, such as gathering nodes and treasure chests calculate their XP rewards just like quests
                 if (uint8 xpDifficulty = goInfo->chest.xpDifficulty)

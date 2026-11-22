@@ -5054,6 +5054,7 @@ void Player::UpdateRating(CombatRating cr)
     for (AuraEffectList::const_iterator i = modRatingFromStat.begin(); i != modRatingFromStat.end(); ++i)
         if ((*i)->GetMiscValue() & (1<<cr))
             amount += int32(CalculatePct(GetStat(StatType((*i)->GetMiscValueB())), (*i)->GetAmount()));
+    amount = int32(amount * m_azimovAllStatsMult);   // Azimov : talents « toutes les stats »
     if (amount < 0)
         amount = 0;
     SetUInt32Value(PLAYER_FIELD_COMBAT_RATING_1 + AsUnderlyingType(cr), uint32(amount));

@@ -41,6 +41,7 @@
 #include "SpellAuras.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
+#include "Stats.h"
 #include "WorldSession.h"
 #include "CellImpl.h"
 #include "GameTime.h"
@@ -48,6 +49,8 @@
 #include "GridNotifiersImpl.h"
 #include "ObjectAccessor.h"
 #include <algorithm>
+#include <cmath>
+#include <iterator>
 #include <list>
 #include <cstdio>
 #include <cstdlib>
@@ -70,6 +73,29 @@ namespace
     constexpr uint8  FLAG_PROF_DOUBLE    = 0x10;  // Apprentissage éclair : chance de points de métier doublés
     constexpr uint8  FLAG_CRAFT_DOUBLE   = 0x20;  // Artisan inspiré : chance d'objet fabriqué en double
     constexpr uint8  FLAG_EXPERT_REFINING = 0x40; // Raffinage d'expert : +1 Raffinage par 10 points du meilleur métier de récolte
+    constexpr uint8  FLAG_BOOK_DROP       = 0x80; // Bibliothécaire : chance de trouver un livre de métier en récoltant
+
+    // Livres de métier (objets custom 1200101-1200115) : +5 points dans le métier du livre
+    struct AzBook { uint32 item; uint16 skill; char const* name; };
+    AzBook const BOOKS[] =
+    {
+        { 1200101, SKILL_ALCHEMY,        "Alchimie" },
+        { 1200102, SKILL_BLACKSMITHING,  "Forge" },
+        { 1200103, SKILL_ENCHANTING,     "Enchantement" },
+        { 1200104, SKILL_ENGINEERING,    "Ingénierie" },
+        { 1200105, SKILL_HERBALISM,      "Herboristerie" },
+        { 1200106, SKILL_INSCRIPTION,    "Calligraphie" },
+        { 1200107, SKILL_JEWELCRAFTING,  "Joaillerie" },
+        { 1200108, SKILL_LEATHERWORKING, "Travail du cuir" },
+        { 1200109, SKILL_MINING,         "Minage" },
+        { 1200110, SKILL_SKINNING,       "Dépeçage" },
+        { 1200111, SKILL_TAILORING,      "Couture" },
+        { 1200112, SKILL_COOKING,        "Cuisine" },
+        { 1200113, SKILL_FIRST_AID,      "Secourisme" },
+        { 1200114, SKILL_FISHING,        "Pêche" },
+        { 1200115, SKILL_ARCHAEOLOGY,    "Archéologie" },
+    };
+    constexpr uint32 BOOK_POINTS = 5;
     constexpr uint32 SPELL_TITAN_GRIP_PENALTY = 49152;
     constexpr uint32 SPELL_LEECH_LOG = 20004;      // « Vol de vie » : nom affiché pour le soin du talent dans le journal de combat
     constexpr uint32 SPELL_LIGHT_STRIKE = 9734;    // Châtiment sacré (dégâts de Sacré, visuel des talents de lumière)
@@ -96,6 +122,7 @@ namespace
         float  powerPct = 0.0f;   // % de Puissance Azimov gagnée en plus (toute source)
         uint8  gatherRestore = 0; // % de vie / mana / énergie rendus à chaque récolte (cumulable)
         uint8  lightProc = 0;     // 1 = Frappe de lumière (cible), 2 = Lumière éclatante (5 ennemis)
+        float  allStatsPct = 0.0f; // % en plus sur toutes les stats (caractéristiques, scores, Polyvalence, Raffinage)
         std::string name;
         std::string icon;
         std::string description;
@@ -138,7 +165,7 @@ namespace
     {
         s_talents.clear();
         QueryResult result = WorldDatabase.Query(
-            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags, harvest_keep, haste, crit, dmg_pct, leech_pct, power_pct, gather_restore, light_proc FROM azimov_talent");
+            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags, harvest_keep, haste, crit, dmg_pct, leech_pct, power_pct, gather_restore, light_proc, all_stats_pct FROM azimov_talent");
         if (result)
         {
             do
@@ -166,6 +193,7 @@ namespace
                 t.powerPct    = f[18].GetFloat();
                 t.gatherRestore = f[19].GetUInt8();
                 t.lightProc   = f[20].GetUInt8();
+                t.allStatsPct = f[21].GetFloat();
 
                 if (t.spellId && !sSpellMgr->GetSpellInfo(t.spellId))
                 {
@@ -214,6 +242,7 @@ namespace
         int32 versa = 0, refining = 0, haste = 0, crit = 0;
         float dmgPct = 0.0f, leechPct = 0.0f;
         uint8 flags = 0, lightProc = 0;
+        float allStatsPct = 0.0f;
         for (uint32 id : owned)
             if (AzTalent const* t = GetTalent(id))
             {
@@ -225,6 +254,7 @@ namespace
                 dmgPct += t->dmgPct;
                 leechPct += t->leechPct;
                 lightProc |= t->lightProc;
+                allStatsPct += t->allStatsPct;
             }
 
         // Raffinage d'expert : meilleur métier de récolte (herboristerie, minage, dépeçage) / 10
@@ -265,7 +295,17 @@ namespace
             player->ApplyCustomVersatilityRating(versa - old.versa, true);
         if (refining != old.refining)
             player->ApplyCustomRefiningRating(refining - old.refining, true);
-        if (versa != old.versa || refining != old.refining)
+        // Toutes les stats (+X %) : multiplicateur du cœur, puis recalcul des caractéristiques et des scores
+        float mult = 1.0f + allStatsPct / 100.0f;
+        bool multChanged = std::fabs(player->GetAzimovAllStatsMult() - mult) > 0.0001f;
+        if (multChanged)
+        {
+            player->SetAzimovAllStatsMult(mult);
+            player->GetStats().UpdateTotalStatMultiplier(StatType::AllPrimaryStats);
+            player->UpdateAllRatings();
+        }
+
+        if (versa != old.versa || refining != old.refining || multChanged)
             CustomStats::SendStatsToClient(player);
     }
 
@@ -324,6 +364,16 @@ namespace
                 player->ModifyPower(power, std::max(1, CalculatePct(maxPower, pct)));
     }
 
+    // Bibliothécaire (Récolte 40) : chance de trouver un livre de métier au hasard
+    void DropBook(Player* player, uint8 flags)
+    {
+        if (!(flags & FLAG_BOOK_DROP) || !roll_chance_i(sConfigMgr->GetIntDefault("Azimov.Talents.Livres.Chance", 10)))
+            return;
+        AzBook const& book = BOOKS[urand(0, uint32(std::size(BOOKS)) - 1)];
+        if (player->AddItem(book.item, 1))
+            ChatHandler(player->GetSession()).PSendSysMessage("|cff00ff96Talent Azimov : vous trouvez un livre de %s !|r", book.name);
+    }
+
     bool OnGatherNodeLooted(Player* player, GameObject* go)
     {
         if (!player || !IsGatherNode(go))
@@ -332,6 +382,7 @@ namespace
         uint8 flags = OwnedFlags(owned);
         GiveHarvestPoints(player, flags);
         RestoreOnGather(player, owned);
+        DropBook(player, flags);
         if (flags & FLAG_EXPERT_REFINING)
             ApplyStats(player); // le métier a pu monter pendant la récolte
 
@@ -371,6 +422,7 @@ namespace
         uint8 flags = OwnedFlags(owned);
         GiveHarvestPoints(player, flags);
         RestoreOnGather(player, owned);
+        DropBook(player, flags);
         if (flags & FLAG_EXPERT_REFINING)
             ApplyStats(player); // le dépeçage a pu monter
     }
@@ -570,7 +622,7 @@ namespace
             AzTalent const& t = kv.second;
             char head[96];
             snprintf(head, sizeof(head), "D:%u~%u~%u~%u~%u~%u~%u~", t.id, t.path, t.position, t.cost,
-                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining || t.flags || t.harvestKeep || t.haste || t.crit || t.dmgPct > 0.0f || t.leechPct > 0.0f || t.powerPct > 0.0f || t.gatherRestore || t.lightProc) ? 1 : 0);
+                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining || t.flags || t.harvestKeep || t.haste || t.crit || t.dmgPct > 0.0f || t.leechPct > 0.0f || t.powerPct > 0.0f || t.gatherRestore || t.lightProc || t.allStatsPct > 0.0f) ? 1 : 0);
             Send(player, Utf8Cut(std::string(head) + t.icon + "~" + t.name, 250));
             if (!t.description.empty())
                 Send(player, Utf8Cut("T:" + std::to_string(t.id) + "~" + t.description, 250));
@@ -812,6 +864,45 @@ public:
     }
 };
 
+// Livres de métier : clic droit = +5 points dans le métier du livre (sans dépasser le maximum actuel)
+class item_azimov_livre_metier : public ItemScript
+{
+public:
+    item_azimov_livre_metier() : ItemScript("item_azimov_livre_metier") { }
+
+    bool OnUse(Player* player, Item* item, SpellCastTargets const& /*targets*/) override
+    {
+        AzBook const* book = nullptr;
+        for (AzBook const& b : BOOKS)
+            if (b.item == item->GetEntry())
+                book = &b;
+        if (!book)
+            return false;
+
+        ChatHandler chat(player->GetSession());
+        if (!player->HasSkill(book->skill))
+        {
+            chat.PSendSysMessage("|cffff6060Vous ne connaissez pas le métier %s.|r", book->name);
+            return true;
+        }
+        uint16 cur = player->GetPureSkillValue(book->skill);
+        uint16 max = player->GetPureMaxSkillValue(book->skill);
+        if (cur >= max)
+        {
+            chat.PSendSysMessage("|cffff6060Votre %s est déjà au maximum de votre rang (%u / %u). Apprenez le rang suivant auprès d'un maître.|r", book->name, cur, max);
+            return true;
+        }
+        uint16 val = uint16(std::min<uint32>(cur + BOOK_POINTS, max));
+        player->SetSkill(book->skill, player->GetSkillStep(book->skill), val, max);
+        uint32 count = 1;
+        player->DestroyItemCount(item, count, true);
+        chat.PSendSysMessage("|cff00ff96Livre de %s : +%u points (%u / %u).|r", book->name, uint32(val - cur), uint32(val), uint32(max));
+        if (book->skill == SKILL_HERBALISM || book->skill == SKILL_MINING || book->skill == SKILL_SKINNING)
+            ApplyStats(player);   // Raffinage d'expert suit le meilleur métier de récolte
+        return true;
+    }
+};
+
 // Dégâts infligés en plus (talents « +X % de dégâts »)
 class azimov_talents_damage : public UnitScript
 {
@@ -939,4 +1030,5 @@ void AddSC_azimov_talents()
     new azimov_talents_player();
     new azimov_talents_command();
     new azimov_talents_damage();
+    new item_azimov_livre_metier();
 }
