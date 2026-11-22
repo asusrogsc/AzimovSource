@@ -182,12 +182,12 @@ public:
             has_fled = false;
             interrupt_cooldown = 20000;
             scheduler
-                .Schedule(Seconds(0), [this](TaskContext& ArcaneMissiles)
+                .Schedule(Seconds(0), [this](TaskContext ArcaneMissiles)
                 {
                     DoCastVictim(SPELL_ARCANE_MISSILES);
                     ArcaneMissiles.Repeat(Milliseconds(2400), Milliseconds(3800));
                 })
-                .Schedule(Seconds(3), Seconds(6), [this](TaskContext& ChainsOfIce)
+                .Schedule(Seconds(3), Seconds(6), [this](TaskContext ChainsOfIce)
                 {
                     if (Unit* target = SelectTarget(SELECT_TARGET_RANDOM))
                         DoCast(target, SPELL_CHAINS_OF_ICE, true);
@@ -241,7 +241,7 @@ public:
         void JustEngagedWith(Unit* /*who*/) override
         {
             scheduler
-                .Schedule(Milliseconds(4500), [this](TaskContext& MindSear)
+                .Schedule(Milliseconds(4500), [this](TaskContext MindSear)
                 {
                     DoCastVictim(SPELL_MIND_SEAR);
                     MindSear.Repeat(Milliseconds(7000), Milliseconds(11000));
@@ -324,11 +324,11 @@ public:
         {
             used_healing = false;
             scheduler
-                .Schedule(Seconds(2), [this](TaskContext const& /*SearingTotem*/)
+                .Schedule(Seconds(2), [this](TaskContext /*SearingTotem*/)
                 {
                     DoCast(SPELL_SCORCHING_TOTEM);
                 })
-                .Schedule(Seconds(6), [this](TaskContext& FrostShock)
+                .Schedule(Seconds(6), [this](TaskContext FrostShock)
                 {
                     DoCastVictim(SPELL_FROST_SHOCK);
                     FrostShock.Repeat(Seconds(12));
