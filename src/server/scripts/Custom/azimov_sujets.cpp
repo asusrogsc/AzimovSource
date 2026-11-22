@@ -12,7 +12,8 @@
  *
  * Protocole addon (préfixe AZSUJ, chuchotement à soi-même) :
  *   client -> serveur : "AZSUJ_Q" (liste des donjons), "AZSUJ_E:<donjon>:<rôle>" (entrer ; rôle 0 tank, 1 soigneur, 2 DPS)
- *   serveur -> client : "L:<donjon>~<niv min>~<niv max>~<nom>" (une ligne par donjon), "F" (fin de liste), "M:<texte>"
+ *   serveur -> client : "L:<donjon>~<niv min>~<niv max>~<nom>" (une ligne par donjon), "F" (fin de liste), "M:<texte>",
+ *                       "H:<entry>~<vie %>~<mana %>~<nom>" (état de chaque sujet, chaque seconde, pour les cadres de groupe)
  *
  * Réglages worldserver.conf :
  *   Azimov.Sujets.Actif (1), Azimov.Sujets.Degats (100 = 100 %), Azimov.Sujets.Soins (100)
@@ -64,7 +65,8 @@ namespace
         SPELL_HEAL      = 2061,   // Soins rapides (montant imposé)
         SPELL_FROSTBOLT = 116,    // Éclair de givre (dégâts imposés)
         SPELL_LIGHTNING = 403,    // Éclair (dégâts imposés)
-        SPELL_SMITE     = 585     // Châtiment (dégâts imposés)
+        SPELL_SMITE     = 585,    // Châtiment (dégâts imposés)
+        SPELL_DRINK     = 430     // Boisson (visuel : le sujet s'assoit et boit)
     };
 
     struct AzSujetGroup
@@ -252,7 +254,7 @@ namespace
 // IA commune des sujets
 struct npc_azimov_sujet : public ScriptedAI
 {
-    npc_azimov_sujet(Creature* creature) : ScriptedAI(creature), _thinkTimer(500), _summonTimer(5000) { }
+    npc_azimov_sujet(Creature* creature) : ScriptedAI(creature), _thinkTimer(500), _summonTimer(5000), _drinking(false), _statusTimer(0) { }
 
     Player* Owner() const
     {
@@ -307,6 +309,48 @@ struct npc_azimov_sujet : public ScriptedAI
         if (!best && me->GetVictim() && CanFight(me->GetVictim()) && me->GetVictim()->IsInCombat())
             best = me->GetVictim();
         return best;
+    }
+
+    // Mana : jamais à sec. En combat +1 % par demi-seconde ; hors combat, si le joueur ne bouge pas,
+    // le sujet s'assoit et boit (+8 % par demi-seconde) jusqu'à être plein. La boisson ne se consomme pas.
+    void RegenMana(Player* owner, bool inCombat)
+    {
+        int32 maxMana = me->GetMaxPower(POWER_MANA);
+        if (maxMana <= 0)
+            return;
+
+        if (inCombat)
+        {
+            StopDrinking();
+            if (me->GetPower(POWER_MANA) < maxMana)
+                me->ModifyPower(POWER_MANA, std::max(1, maxMana / 100));
+            return;
+        }
+
+        bool needMana = me->GetPower(POWER_MANA) < maxMana;
+        if (needMana && !owner->isMoving() && me->IsWithinDistInMap(owner, 8.0f))
+        {
+            if (!_drinking)
+            {
+                _drinking = true;
+                me->GetMotionMaster()->Clear();
+                me->StopMoving();
+                me->CastSpell(me, SPELL_DRINK, true);
+                me->SetStandState(UNIT_STAND_STATE_SIT);
+            }
+            me->ModifyPower(POWER_MANA, std::max(1, maxMana * 8 / 100));
+        }
+        else
+            StopDrinking();
+    }
+
+    void StopDrinking()
+    {
+        if (!_drinking)
+            return;
+        _drinking = false;
+        me->RemoveAurasDueToSpell(SPELL_DRINK);
+        me->SetStandState(UNIT_STAND_STATE_STAND);
     }
 
     void FollowOwner(Player* owner)
@@ -372,6 +416,8 @@ struct npc_azimov_sujet : public ScriptedAI
 
     void JustDied(Unit* /*killer*/) override
     {
+        if (Player* owner = Owner())
+            Send(owner, "H:" + std::to_string(me->GetEntry()) + "~0~0~" + me->GetName());
         me->DespawnOrUnsummon(5000);
     }
 
@@ -394,6 +440,17 @@ struct npc_azimov_sujet : public ScriptedAI
             return;
         }
 
+        // État pour les cadres de groupe de l'addon (vie, mana)
+        if (_statusTimer <= diff)
+        {
+            _statusTimer = 1000;
+            uint32 manaPct = me->GetMaxPower(POWER_MANA) > 0 ? uint32(100.0f * me->GetPower(POWER_MANA) / me->GetMaxPower(POWER_MANA)) : 0;
+            Send(owner, "H:" + std::to_string(me->GetEntry()) + "~" + std::to_string(uint32(me->GetHealthPct())) + "~"
+                + std::to_string(manaPct) + "~" + me->GetName());
+        }
+        else
+            _statusTimer -= diff;
+
         if (_thinkTimer > diff)
         {
             _thinkTimer -= diff;
@@ -412,9 +469,12 @@ struct npc_azimov_sujet : public ScriptedAI
         std::vector<Unit*> party = Party(owner);
         Unit* enemy = PickEnemy(owner, party);
 
+        RegenMana(owner, enemy != nullptr);
+
         if (!enemy)
         {
-            FollowOwner(owner);
+            if (!_drinking)
+                FollowOwner(owner);
             if (IsHealer() && !me->HasUnitState(UNIT_STATE_CASTING))
                 HealSomeone(party, 90.0f);
 
@@ -460,6 +520,8 @@ struct npc_azimov_sujet : public ScriptedAI
 private:
     uint32 _thinkTimer;
     uint32 _summonTimer;
+    bool _drinking;
+    uint32 _statusTimer;
 };
 
 class azimov_sujets_player : public PlayerScript
