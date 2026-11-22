@@ -239,6 +239,12 @@ void AddSC_swamp_of_sorrows();
 void AddSC_tirisfal_glades();
 void AddSC_tol_barad();
 void AddSC_twilight_highlands();
+// Portés de TrinityCore cata_classic (Azimov)
+void AddSC_worldboss_julak_doom();
+void AddSC_vashjir();
+void AddSC_worldboss_mobus();
+void AddSC_vashjir_chapter_1_defense_of_the_briny_cutter();
+void AddSC_abyssal_depths();
 void AddSC_undercity();
 void AddSC_western_plaguelands();
 void AddSC_westfall();
@@ -471,6 +477,11 @@ void AddEasternKingdomsScripts()
     AddSC_tirisfal_glades();
     AddSC_tol_barad();
     AddSC_twilight_highlands();
+    AddSC_worldboss_julak_doom();
+    AddSC_vashjir();
+    AddSC_worldboss_mobus();
+    AddSC_vashjir_chapter_1_defense_of_the_briny_cutter();
+    AddSC_abyssal_depths();
     AddSC_undercity();
     AddSC_western_plaguelands();
     AddSC_westfall();

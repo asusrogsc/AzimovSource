@@ -30,6 +30,7 @@ void AddSC_npcs_special();
 void AddSC_achievement_scripts();
 void AddSC_action_ip_logger();
 void AddSC_duel_reset();
+void AddSC_emerald_dragons();
 void AddSC_world_map_scripts();
 // player
 void AddSC_chat_log();
@@ -56,4 +57,5 @@ void AddWorldScripts()
     if (sWorld->getBoolConfig(CONFIG_IP_BASED_ACTION_LOGGING))
         AddSC_action_ip_logger(); // location: scripts\World\action_ip_logger.cpp
     AddSC_duel_reset();
+    AddSC_emerald_dragons();
 }
