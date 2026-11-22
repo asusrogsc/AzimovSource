@@ -42,7 +42,13 @@
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "WorldSession.h"
+#include "CellImpl.h"
+#include "GameTime.h"
+#include "GridNotifiers.h"
+#include "GridNotifiersImpl.h"
+#include "ObjectAccessor.h"
 #include <algorithm>
+#include <list>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -65,6 +71,7 @@ namespace
     constexpr uint8  FLAG_CRAFT_DOUBLE   = 0x20;  // Artisan inspiré : chance d'objet fabriqué en double
     constexpr uint8  FLAG_EXPERT_REFINING = 0x40; // Raffinage d'expert : +1 Raffinage par 10 points du meilleur métier de récolte
     constexpr uint32 SPELL_TITAN_GRIP_PENALTY = 49152;
+    constexpr uint32 SPELL_LIGHT_STRIKE = 9734;    // Châtiment sacré (dégâts de Sacré, visuel des talents de lumière)
     constexpr uint32 SPELL_STAVES   = 227;
     constexpr uint32 SPELL_POLEARMS = 200;
 
@@ -87,6 +94,7 @@ namespace
         float  leechPct = 0.0f;   // % des dégâts infligés rendus en vie (vol de vie)
         float  powerPct = 0.0f;   // % de Puissance Azimov gagnée en plus (toute source)
         uint8  gatherRestore = 0; // % de vie / mana / énergie rendus à chaque récolte (cumulable)
+        uint8  lightProc = 0;     // 1 = Frappe de lumière (cible), 2 = Lumière éclatante (5 ennemis)
         std::string name;
         std::string icon;
         std::string description;
@@ -99,6 +107,8 @@ namespace
     struct AppliedStats { int32 versa = 0; int32 refining = 0; int32 haste = 0; int32 crit = 0; };
     std::unordered_map<ObjectGuid::LowType, float> s_dmgPct;                  // personnage -> % de dégâts en plus (protégé par s_lock)
     std::unordered_map<ObjectGuid::LowType, float> s_leechPct;                // personnage -> % de vol de vie (protégé par s_lock)
+    std::unordered_map<ObjectGuid::LowType, uint8> s_lightProc;               // personnage -> talents de lumière (protégé par s_lock)
+    std::unordered_map<ObjectGuid::LowType, uint32> s_lightNext;              // personnage -> prochaine frappe possible (ms de jeu)
     std::unordered_map<ObjectGuid::LowType, AppliedStats> s_stats;           // personnage -> scores déjà appliqués
 
     uint32 CurrencyId()
@@ -127,7 +137,7 @@ namespace
     {
         s_talents.clear();
         QueryResult result = WorldDatabase.Query(
-            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags, harvest_keep, haste, crit, dmg_pct, leech_pct, power_pct, gather_restore FROM azimov_talent");
+            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags, harvest_keep, haste, crit, dmg_pct, leech_pct, power_pct, gather_restore, light_proc FROM azimov_talent");
         if (result)
         {
             do
@@ -154,6 +164,7 @@ namespace
                 t.leechPct    = f[17].GetFloat();
                 t.powerPct    = f[18].GetFloat();
                 t.gatherRestore = f[19].GetUInt8();
+                t.lightProc   = f[20].GetUInt8();
 
                 if (t.spellId && !sSpellMgr->GetSpellInfo(t.spellId))
                 {
@@ -201,7 +212,7 @@ namespace
         std::set<uint32> owned = GetOwned(player);
         int32 versa = 0, refining = 0, haste = 0, crit = 0;
         float dmgPct = 0.0f, leechPct = 0.0f;
-        uint8 flags = 0;
+        uint8 flags = 0, lightProc = 0;
         for (uint32 id : owned)
             if (AzTalent const* t = GetTalent(id))
             {
@@ -212,6 +223,7 @@ namespace
                 crit += t->crit;
                 dmgPct += t->dmgPct;
                 leechPct += t->leechPct;
+                lightProc |= t->lightProc;
             }
 
         // Raffinage d'expert : meilleur métier de récolte (herboristerie, minage, dépeçage) / 10
@@ -235,6 +247,10 @@ namespace
                 s_leechPct[player->GetGUID().GetCounter()] = leechPct;
             else
                 s_leechPct.erase(player->GetGUID().GetCounter());
+            if (lightProc)
+                s_lightProc[player->GetGUID().GetCounter()] = lightProc;
+            else
+                s_lightProc.erase(player->GetGUID().GetCounter());
         }
 
         if (haste != old.haste)
@@ -553,7 +569,7 @@ namespace
             AzTalent const& t = kv.second;
             char head[96];
             snprintf(head, sizeof(head), "D:%u~%u~%u~%u~%u~%u~%u~", t.id, t.path, t.position, t.cost,
-                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining || t.flags || t.harvestKeep || t.haste || t.crit || t.dmgPct > 0.0f || t.leechPct > 0.0f || t.powerPct > 0.0f || t.gatherRestore) ? 1 : 0);
+                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining || t.flags || t.harvestKeep || t.haste || t.crit || t.dmgPct > 0.0f || t.leechPct > 0.0f || t.powerPct > 0.0f || t.gatherRestore || t.lightProc) ? 1 : 0);
             Send(player, Utf8Cut(std::string(head) + t.icon + "~" + t.name, 250));
             if (!t.description.empty())
                 Send(player, Utf8Cut("T:" + std::to_string(t.id) + "~" + t.description, 250));
@@ -718,6 +734,8 @@ public:
         s_stats.erase(player->GetGUID().GetCounter());
         s_dmgPct.erase(player->GetGUID().GetCounter());
         s_leechPct.erase(player->GetGUID().GetCounter());
+        s_lightProc.erase(player->GetGUID().GetCounter());
+        s_lightNext.erase(player->GetGUID().GetCounter());
     }
 
     void OnChat(Player* player, uint32 /*type*/, uint32 lang, std::string& msg, Player* receiver) override
@@ -823,6 +841,60 @@ public:
         if (pct > 0.0f)
             if (int32 heal = int32(damage * pct / 100.0f))
                 attacker->ModifyHealth(heal);
+
+        LightStrike(attacker->ToPlayer(), victim);
+    }
+
+    // Héroïque 30 : Frappe de lumière / Lumière éclatante (une fois toutes les 30 s au plus)
+    static void LightStrike(Player* player, Unit* victim)
+    {
+        if (!player || !victim || !victim->IsAlive() || !player->IsValidAttackTarget(victim))
+            return;
+        uint8 proc = 0;
+        uint32 const now = GameTime::GetGameTimeMS();
+        {
+            std::lock_guard<std::mutex> guard(s_lock);
+            auto itr = s_lightProc.find(player->GetGUID().GetCounter());
+            if (itr == s_lightProc.end())
+                return;
+            proc = itr->second;
+            uint32& next = s_lightNext[player->GetGUID().GetCounter()];
+            if (next && int32(next - now) > 0)
+                return;
+            next = now + uint32(std::max(1, sConfigMgr->GetIntDefault("Azimov.Talents.Lumiere.Delai", 30))) * IN_MILLISECONDS;
+        }
+
+        // Puissance de référence : la plus haute entre puissance d'attaque (mêlée / distance) et puissance des sorts sacrés
+        float power = std::max({ player->GetTotalAttackPowerValue(BASE_ATTACK), player->GetTotalAttackPowerValue(RANGED_ATTACK),
+            float(player->SpellBaseDamageBonusDone(SPELL_SCHOOL_MASK_HOLY)) });
+        bool const zone = (proc & 2) != 0;
+        int32 const pct = zone ? sConfigMgr->GetIntDefault("Azimov.Talents.Lumiere.Zone.Pct", 150) : sConfigMgr->GetIntDefault("Azimov.Talents.Lumiere.Pct", 300);
+        int32 const dmg = std::max(1, int32(power * pct / 100.0f) + int32(player->getLevel()) * 10);
+
+        std::vector<ObjectGuid> targets{ victim->GetGUID() };
+        if (zone)
+        {
+            std::list<Unit*> around;
+            Trinity::AnyUnfriendlyUnitInObjectRangeCheck check(victim, player, 8.0f);
+            Trinity::UnitListSearcher<Trinity::AnyUnfriendlyUnitInObjectRangeCheck> searcher(victim, around, check);
+            Cell::VisitAllObjects(victim, searcher, 8.0f);
+            for (Unit* u : around)
+            {
+                if (targets.size() >= 5)
+                    break;
+                if (u != victim && player->IsValidAttackTarget(u))
+                    targets.push_back(u->GetGUID());
+            }
+        }
+
+        // Lancé au tick suivant : on est dans Unit::DealDamage, pas question d'y imbriquer un sort
+        player->m_Events.AddEventAtOffset([player, targets, dmg]()
+        {
+            for (ObjectGuid const& guid : targets)
+                if (Unit* target = ObjectAccessor::GetUnit(*player, guid))
+                    if (target->IsAlive() && player->IsValidAttackTarget(target))
+                        player->CastSpell(target, SPELL_LIGHT_STRIKE, CastSpellExtraArgs(TRIGGERED_FULL_MASK).AddSpellBP0(dmg));
+        }, 1ms);
     }
 
     void ModifyMeleeDamage(Unit* /*target*/, Unit* attacker, uint32& damage) override

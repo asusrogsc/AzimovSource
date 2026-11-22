@@ -148,6 +148,7 @@ void AddSC_azuremyst_isle();
 void AddSC_bloodmyst_isle();
 void AddSC_desolace();
 void AddSC_durotar();
+void AddSC_durotar_cata();
 void AddSC_dustwallow_marsh();
 void AddSC_felwood();
 void AddSC_moonglade();
@@ -298,6 +299,7 @@ void AddKalimdorScripts()
     AddSC_bloodmyst_isle();
     AddSC_desolace();
     AddSC_durotar();
+    AddSC_durotar_cata();
     AddSC_dustwallow_marsh();
     AddSC_felwood();
     AddSC_moonglade();

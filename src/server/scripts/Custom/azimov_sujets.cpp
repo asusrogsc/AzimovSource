@@ -17,6 +17,10 @@
  *
  * Réglages worldserver.conf :
  *   Azimov.Sujets.Actif (1), Azimov.Sujets.Degats (100 = 100 %), Azimov.Sujets.Soins (100)
+ *   Par rôle (<Role> = Tank, Soigneur, Melee, Lanceur, Distance), en %, 100 par défaut :
+ *     Azimov.Sujets.<Role>.Vie         : points de vie
+ *     Azimov.Sujets.<Role>.Degats      : tous les dégâts infligés (mêlée, sorts, effets périodiques)
+ *     Azimov.Sujets.<Role>.DegatsSubis : dégâts reçus
  */
 
 #include "ScriptMgr.h"
@@ -37,6 +41,7 @@
 #include "ThreatManager.h"
 #include <algorithm>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -81,6 +86,30 @@ namespace
 
     std::mutex s_lock;
     std::unordered_map<ObjectGuid::LowType, AzSujetGroup> s_groups;
+
+    // Nom du rôle d'un sujet dans worldserver.conf (Azimov.Sujets.<Role>.Vie / .Degats / .DegatsSubis)
+    char const* RoleKey(uint32 entry)
+    {
+        switch (entry)
+        {
+            case NPC_SUJET_TANK:   return "Tank";
+            case NPC_SUJET_HEAL:   return "Soigneur";
+            case NPC_SUJET_MELEE:  return "Melee";
+            case NPC_SUJET_CASTER: return "Lanceur";
+            case NPC_SUJET_RANGED: return "Distance";
+            default:               return nullptr;
+        }
+    }
+
+    float RolePct(Unit const* unit, char const* setting)
+    {
+        if (!unit || unit->GetTypeId() != TYPEID_UNIT)
+            return 1.0f;
+        char const* role = RoleKey(unit->GetEntry());
+        if (!role)
+            return 1.0f;
+        return float(std::max(0, sConfigMgr->GetIntDefault(std::string("Azimov.Sujets.") + role + "." + setting, 100))) / 100.0f;
+    }
 
     bool Enabled()
     {
@@ -174,6 +203,14 @@ namespace
             sujet->SetFaction(player->GetFaction());
             sujet->SetLevel(player->getLevel());
             sujet->UpdateLevelDependantStats();
+            // Points de vie par rôle (Azimov.Sujets.<Role>.Vie)
+            if (float vie = RolePct(sujet, "Vie"); vie != 1.0f)
+            {
+                uint32 health = std::max<uint32>(1, uint32(float(sujet->GetCreateHealth()) * vie));
+                sujet->SetCreateHealth(health);
+                sujet->SetStatFlatModifier(UNIT_MOD_HEALTH, BASE_VALUE, float(health));
+                sujet->UpdateMaxHealth();
+            }
             sujet->SetFullHealth();
             sujet->SetPower(POWER_MANA, sujet->GetMaxPower(POWER_MANA));
             sujet->GetMotionMaster()->MoveFollow(player, 2.5f, AngleFor(m.second));
@@ -572,8 +609,40 @@ public:
     }
 };
 
+// Dégâts infligés / subis par rôle (Azimov.Sujets.<Role>.Degats / .DegatsSubis)
+class azimov_sujets_damage : public UnitScript
+{
+public:
+    azimov_sujets_damage() : UnitScript("azimov_sujets_damage") { }
+
+    static float Factor(Unit* target, Unit* attacker)
+    {
+        return RolePct(attacker, "Degats") * RolePct(target, "DegatsSubis");
+    }
+
+    void ModifyMeleeDamage(Unit* target, Unit* attacker, uint32& damage) override
+    {
+        if (float f = Factor(target, attacker); f != 1.0f)
+            damage = uint32(float(damage) * f);
+    }
+
+    void ModifySpellDamageTaken(Unit* target, Unit* attacker, int32& damage) override
+    {
+        if (damage > 0)
+            if (float f = Factor(target, attacker); f != 1.0f)
+                damage = int32(float(damage) * f);
+    }
+
+    void ModifyPeriodicDamageAurasTick(Unit* target, Unit* attacker, uint32& damage) override
+    {
+        if (float f = Factor(target, attacker); f != 1.0f)
+            damage = uint32(float(damage) * f);
+    }
+};
+
 void AddSC_azimov_sujets()
 {
+    new azimov_sujets_damage();
     RegisterCreatureAI(npc_azimov_sujet);
     new azimov_sujets_player();
 }

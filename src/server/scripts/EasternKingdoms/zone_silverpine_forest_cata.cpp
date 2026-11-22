@@ -670,7 +670,7 @@ struct npc_silverpine_grand_executor_mortuus : public ScriptedAI
                 {
                     if (Creature* agatha = ObjectAccessor::GetCreature(*me, _agathaGUID))
                     {
-                        agatha->GetMotionMaster()->MovePoint(POINT_AGATHA_PRE_RESET, AgathaPreResetPos, false, 0.855211f);
+                        agatha->GetMotionMaster()->MovePoint(POINT_AGATHA_PRE_RESET, AgathaPreResetPos, false);
 
                         _events.ScheduleEvent(EVENT_SCENE_TALK_COMETH + 14, 750ms);
                     }
@@ -710,7 +710,7 @@ struct npc_silverpine_grand_executor_mortuus : public ScriptedAI
                 {
                     if (Creature* agatha = ObjectAccessor::GetCreature(*me, _agathaGUID))
                     {
-                        agatha->GetMotionMaster()->MovePoint(POINT_AGATHA_RESET, AgathaResetPos, false, 0.7155f);
+                        agatha->GetMotionMaster()->MovePoint(POINT_AGATHA_RESET, AgathaResetPos, false);
 
                         _events.ScheduleEvent(EVENT_SCENE_TALK_COMETH + 16, 1s);
                     }
@@ -3503,15 +3503,11 @@ struct npc_silverpine_forest_ettin : public ScriptedAI
         }
     }
 
-    void DamageTaken(Unit* /*attacker*/, uint32& damage) override
+    void DamageTaken(Unit* attacker, uint32& damage) override
     {
-        if (!spellInfo)
-            return;
-
-        // HACKFIX: according to BasePoints damage is around 90k, which is wrong. On retail, it deals 80% of its health points only.
-        // Also, Mutant Bush Chicken is summoned as not player-controlled (not blue-taped), though it uses the same summonProperties's
-        // Control and Slot as some other summoning spells from this zone.
-        if (spellInfo->Id == SPELL_BUSH_EXPLOSION)
+        // HACKFIX: l'explosion du Poulet mutant (sort 83903) ferait ~90k ; ce cœur ne transmet pas le sort ici,
+        // on annule donc tout dégât venant du poulet (44935).
+        if (attacker && attacker->GetEntry() == 44935)
             damage = 0;
     }
 
