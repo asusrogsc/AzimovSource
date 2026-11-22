@@ -197,6 +197,15 @@ void AddSC_crystalsong_forest();
 
 // The name of this function should match:
 // void Add${NameOfDirectory}Scripts()
+void AddSC_borean_tundra_cata();
+void AddSC_dragonblight_cata();
+void AddSC_grizzly_hills_cata();
+void AddSC_howling_fjord_cata();
+void AddSC_icecrown_cata();
+void AddSC_sholazar_basin_cata();
+void AddSC_storm_peaks_cata();
+void AddSC_zuldrak_cata();
+
 void AddNorthrendScripts()
 {
     AddSC_boss_slad_ran();               //Gundrak
@@ -377,4 +386,13 @@ void AddNorthrendScripts()
     AddSC_wintergrasp();
     AddSC_zuldrak();
     AddSC_crystalsong_forest();
+    // Azimov - lot 8 (cata_classic)
+    AddSC_borean_tundra_cata();
+    AddSC_dragonblight_cata();
+    AddSC_grizzly_hills_cata();
+    AddSC_howling_fjord_cata();
+    AddSC_icecrown_cata();
+    AddSC_sholazar_basin_cata();
+    AddSC_storm_peaks_cata();
+    AddSC_zuldrak_cata();
 }
