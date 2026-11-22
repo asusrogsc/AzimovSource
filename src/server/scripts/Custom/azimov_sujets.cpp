@@ -404,10 +404,18 @@ struct npc_azimov_sujet : public ScriptedAI
 
         // Ascenseur, téléporteur, chute : trop loin ou trop haut/bas -> on rejoint le joueur
         // (pas pendant qu'il est encore sur l'ascenseur en mouvement, ni pendant un combat)
+        // Il faut que l'écart dure 3 s (le sujet n'arrive pas à suivre) : un simple dénivelé ou un joueur
+        // qui court devant ne doit pas le faire clignoter (une téléportation = disparition/réapparition à l'écran)
+        bool far = false;
         if (!owner->GetTransport() && !me->IsInCombat() && !owner->IsInCombat())
         {
             float dz = std::fabs(me->GetPositionZ() - owner->GetPositionZ());
-            if (me->GetDistance(owner) > 40.0f || (dz > 8.0f && me->GetDistance2d(owner) < 40.0f))
+            far = me->GetDistance(owner) > 60.0f || (dz > 15.0f && me->GetDistance2d(owner) < 25.0f);
+        }
+        _farTime = far ? _farTime + 500 : 0;
+        if (_farTime >= 3000)
+        {
+            _farTime = 0;
             {
                 Position pos = owner->GetPosition();
                 owner->MovePositionToFirstCollision(pos, 2.5f, AngleFor(me->GetEntry()));
@@ -590,6 +598,7 @@ struct npc_azimov_sujet : public ScriptedAI
 private:
     uint32 _thinkTimer;
     uint32 _summonTimer;
+    uint32 _farTime = 0;   // depuis combien de temps (ms) le sujet est trop loin du joueur
     bool _drinking;
     uint32 _statusTimer;
 };
