@@ -172,6 +172,7 @@ enum WildWyrm
     PHASE_MAX                           = 3
 };
 
+uint8 const ControllableSpellsCount = 4;
 uint32 const WyrmControlSpells[PHASE_MAX][ControllableSpellsCount] =
 {
     { SPELL_GRAB_ON,       SPELL_DODGE_CLAWS, SPELL_THRUST_SPEAR, SPELL_MIGHTY_SPEAR_THRUST },
@@ -231,8 +232,8 @@ class spell_storm_peaks_read_pronouncement : public AuraScript
 {
     bool Validate(SpellInfo const* /*spellInfo*/) override
     {
-        return sBroadcastTextStore.HasRecord(TEXT_PRONOUNCEMENT_1) &&
-            sBroadcastTextStore.HasRecord(TEXT_PRONOUNCEMENT_2) &&
+        return (sObjectMgr->GetBroadcastText(TEXT_PRONOUNCEMENT_1) != nullptr) &&
+            (sObjectMgr->GetBroadcastText(TEXT_PRONOUNCEMENT_2) != nullptr) &&
             sObjectMgr->GetCreatureTemplate(NPC_HODIRS_HELM_KC);
     }
 
@@ -281,7 +282,7 @@ class spell_storm_peaks_bear_flank_fail : public AuraScript
 {
     bool Validate(SpellInfo const* /*spellInfo*/) override
     {
-        return sBroadcastTextStore.HasRecord(TEXT_CARVE_FAIL);
+        return (sObjectMgr->GetBroadcastText(TEXT_CARVE_FAIL) != nullptr);
     }
 
     void AfterApply(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)

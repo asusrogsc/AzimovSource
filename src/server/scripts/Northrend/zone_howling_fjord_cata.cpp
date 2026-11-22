@@ -16,6 +16,7 @@
  */
 
 #include "ScriptMgr.h"
+#include <array>
 #include "Containers.h"
 #include "MotionMaster.h"
 #include "ObjectAccessor.h"
@@ -162,6 +163,21 @@ enum RivenwoodCaptives
     SPELL_SUMMON_FREED_MIST_WHISPER_SCOUT = 43289
 };
 
+std::array<uint32, 11> const CocoonSummonSpells =
+{
+    SPELL_SUMMON_BABY_RIVEN_WIDOWS,
+    SPELL_SUMMON_DARKCLAW_BAT,
+    SPELL_SUMMON_FANGGORE_WORG,
+    SPELL_SUMMON_GJALERBRON_RUNECASTER,
+    SPELL_SUMMON_GJALERBRON_SLEEPWATCHER,
+    SPELL_SUMMON_GJALERBRON_WARRIOR,
+    SPELL_SUMMON_PUTRID_HORROR,
+    SPELL_SUMMON_WINTERSKORN_BERSERKER,
+    SPELL_SUMMON_WINTERSKORN_WOODSMAN,
+    SPELL_SUMMON_WINTERSKORN_TRIBESMAN,
+    SPELL_SUMMON_WINTERSKORN_ORACLE
+};
+
 class spell_fjord_rivenwood_captives_not_on_quest : public SpellScript
 {
     bool Validate(SpellInfo const* /*spellInfo*/) override
@@ -232,7 +248,7 @@ class spell_fjord_the_cleansing_shrine_cast : public SpellScript
             if (target->HasAura(SPELL_RECENT_MEDITATION) || (!(target->GetQuestStatus(QUEST_THE_CLEANSING_H) == QUEST_STATUS_INCOMPLETE ||
                 target->GetQuestStatus(QUEST_THE_CLEANSING_A) == QUEST_STATUS_INCOMPLETE)))
             {
-                Spell::SendCastResult(target, GetSpellInfo(), GetSpell()->m_SpellVisual, GetSpell()->m_castId, SPELL_FAILED_FIZZLE);
+                Spell::SendCastResult(target, GetSpellInfo(), GetSpell()->m_cast_count, SPELL_FAILED_FIZZLE);
                 return SPELL_FAILED_FIZZLE;
             }
         }

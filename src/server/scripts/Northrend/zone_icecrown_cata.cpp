@@ -16,6 +16,8 @@
  */
 
 #include "ScriptMgr.h"
+#include "ObjectMgr.h"
+#include <array>
 #include "CombatAI.h"
 #include "Containers.h"
 #include "DB2Stores.h"
@@ -236,6 +238,14 @@ enum ChumTheWaterSummons
     SPELL_SUMMON_NORTH_SEA_BLUE_SHARK    = 66740
 };
 
+std::array<uint32, 4> const ChumTheWaterSummonSpells =
+{
+    SPELL_SUMMON_ANGRY_KVALDIR,
+    SPELL_SUMMON_NORTH_SEA_MAKO,
+    SPELL_SUMMON_NORTH_SEA_THRESHER,
+    SPELL_SUMMON_NORTH_SEA_BLUE_SHARK
+};
+
 class spell_icecrown_chum_the_water : public SpellScript
 {
     bool Validate(SpellInfo const* /*spellInfo*/) override
@@ -268,7 +278,7 @@ class spell_icecrown_through_the_eye_the_eye_of_the_lk : public AuraScript
     bool Validate(SpellInfo const* /*spellInfo*/) override
     {
         return ValidateSpellInfo({ SPELL_SUMMON_IMAGE_OF_VARDMADRA, SPELL_SUMMON_IMAGE_OF_SHADOW_CULTIST }) &&
-            sBroadcastTextStore.LookupEntry(TEXT_USING_THE_EYE_OF_THE_LK);
+            (sObjectMgr->GetBroadcastText(TEXT_USING_THE_EYE_OF_THE_LK) != nullptr);
     }
 
     void AfterApply(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)

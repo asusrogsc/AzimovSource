@@ -16,6 +16,7 @@
  */
 
 #include "ScriptMgr.h"
+#include "ObjectMgr.h"
 #include "Group.h"
 #include <algorithm>
 #include <array>
@@ -501,6 +502,11 @@ class spell_borean_tundra_nerubar_web_random_unit_not_on_quest : public SpellScr
     }
 };
 
+std::array<uint32, 3> const CocoonSummonSpells =
+{
+    SPELL_FREED_WARSONG_MAGE, SPELL_FREED_WARSONG_SHAMAN, SPELL_FREED_WARSONG_WARRIOR
+};
+
 class spell_borean_tundra_nerubar_web_random_unit_not_on_quest_dummy : public SpellScript
 {
     bool Validate(SpellInfo const* /*spellInfo*/) override
@@ -602,11 +608,11 @@ class spell_borean_tundra_kodo_delivered : public SpellScript
 {
     bool Validate(SpellInfo const* /*spellInfo*/) override
     {
-        return sBroadcastTextStore.HasRecord(TEXT_DELIVERED_1) &&
-            sBroadcastTextStore.HasRecord(TEXT_DELIVERED_2) &&
-            sBroadcastTextStore.HasRecord(TEXT_DELIVERED_3) &&
-            sBroadcastTextStore.HasRecord(TEXT_DELIVERED_4) &&
-            sBroadcastTextStore.HasRecord(TEXT_DELIVERED_5);
+        return (sObjectMgr->GetBroadcastText(TEXT_DELIVERED_1) != nullptr) &&
+            (sObjectMgr->GetBroadcastText(TEXT_DELIVERED_2) != nullptr) &&
+            (sObjectMgr->GetBroadcastText(TEXT_DELIVERED_3) != nullptr) &&
+            (sObjectMgr->GetBroadcastText(TEXT_DELIVERED_4) != nullptr) &&
+            (sObjectMgr->GetBroadcastText(TEXT_DELIVERED_5) != nullptr);
     }
 
     void HandleScript(SpellEffIndex /*effIndex*/)
@@ -1059,7 +1065,7 @@ class spell_borean_tundra_red_dragonblood : public AuraScript
 
     void AfterRemove(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
     {
-        if (GetTargetApplication()->!GetRemoveMode().HasFlag(AuraRemoveFlags::Expired))
+        if (!GetTargetApplication()->GetRemoveMode().HasFlag(AuraRemoveFlags::Expired))
             return;
 
         if (Unit* caster = GetCaster())

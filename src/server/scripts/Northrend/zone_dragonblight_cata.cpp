@@ -16,6 +16,7 @@
  */
 
 #include "ScriptMgr.h"
+#include "ObjectMgr.h"
 #include "CombatAI.h"
 #include "CreatureAIImpl.h"
 #include "DB2Stores.h"
@@ -219,13 +220,13 @@ class spell_dragonblight_warsong_battle_standard : public SpellScript
 {
     bool Validate(SpellInfo const* /*spellInfo*/) override
     {
-        return sBroadcastTextStore.HasRecord(TEXT_TAUNT_1) &&
-            sBroadcastTextStore.HasRecord(TEXT_TAUNT_2) &&
-            sBroadcastTextStore.HasRecord(TEXT_TAUNT_3) &&
-            sBroadcastTextStore.HasRecord(TEXT_TAUNT_4) &&
-            sBroadcastTextStore.HasRecord(TEXT_TAUNT_5) &&
-            sBroadcastTextStore.HasRecord(TEXT_TAUNT_6) &&
-            sBroadcastTextStore.HasRecord(TEXT_TAUNT_7);
+        return (sObjectMgr->GetBroadcastText(TEXT_TAUNT_1) != nullptr) &&
+            (sObjectMgr->GetBroadcastText(TEXT_TAUNT_2) != nullptr) &&
+            (sObjectMgr->GetBroadcastText(TEXT_TAUNT_3) != nullptr) &&
+            (sObjectMgr->GetBroadcastText(TEXT_TAUNT_4) != nullptr) &&
+            (sObjectMgr->GetBroadcastText(TEXT_TAUNT_5) != nullptr) &&
+            (sObjectMgr->GetBroadcastText(TEXT_TAUNT_6) != nullptr) &&
+            (sObjectMgr->GetBroadcastText(TEXT_TAUNT_7) != nullptr);
     }
 
     void HandleScript(SpellEffIndex /*effIndex*/)
@@ -293,7 +294,7 @@ class spell_dragonblight_call_out_injured_soldier : public SpellScript
 {
     bool Validate(SpellInfo const* /*spellInfo*/) override
     {
-        return sBroadcastTextStore.HasRecord(TEXT_CALL_OUT_1) && sBroadcastTextStore.HasRecord(TEXT_CALL_OUT_2);
+        return (sObjectMgr->GetBroadcastText(TEXT_CALL_OUT_1) != nullptr) && (sObjectMgr->GetBroadcastText(TEXT_CALL_OUT_2) != nullptr);
     }
 
     void HandleScript(SpellEffIndex /*effIndex*/)

@@ -27,6 +27,15 @@
 
 namespace grizzly_hills_cata
 {
+enum
+{
+    SPELL_ENVISION_DRAKURU_01     = 47118,
+    SPELL_ENVISION_DRAKURU_02     = 47150,
+    SPELL_ENVISION_DRAKURU_03     = 47317,
+    SPELL_ENVISION_DRAKURU_04     = 47406,
+    SPELL_ENVISION_DRAKURU_05     = 50440
+};
+
 enum Floppy
 {
     // Creature

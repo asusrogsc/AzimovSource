@@ -134,6 +134,13 @@ void AddSC_shadowmoon_valley();
 void AddSC_shattrath_city();
 void AddSC_terokkar_forest();
 void AddSC_zangarmarsh();
+void AddSC_blades_edge_mountains_cata();
+void AddSC_hellfire_peninsula_cata();
+void AddSC_nagrand_cata();
+void AddSC_netherstorm_cata();
+void AddSC_shadowmoon_valley_cata();
+void AddSC_terokkar_forest_cata();
+void AddSC_zangarmarsh_cata();
 
 // The name of this function should match:
 // void Add${NameOfDirectory}Scripts()
@@ -257,4 +264,12 @@ void AddOutlandScripts()
     AddSC_shattrath_city();
     AddSC_terokkar_forest();
     AddSC_zangarmarsh();
+    // Azimov - lot 9 (cata_classic)
+    AddSC_blades_edge_mountains_cata();
+    AddSC_hellfire_peninsula_cata();
+    AddSC_nagrand_cata();
+    AddSC_netherstorm_cata();
+    AddSC_shadowmoon_valley_cata();
+    AddSC_terokkar_forest_cata();
+    AddSC_zangarmarsh_cata();
 }
