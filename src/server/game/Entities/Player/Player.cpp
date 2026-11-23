@@ -15621,6 +15621,34 @@ uint16 Player::GetReqKillOrCastCurrentCount(uint32 quest_id, int32 entry) const
     return 0;
 }
 
+// Azimov : remet à zéro le compteur d'un objectif « tuer / utiliser » (nouvelle partie d'un mini-jeu)
+void Player::ResetQuestObjectiveCount(uint32 questId, int32 entry)
+{
+    Quest const* qInfo = sObjectMgr->GetQuestTemplate(questId);
+    if (!qInfo)
+        return;
+
+    auto itr = m_QuestStatus.find(questId);
+    if (itr == m_QuestStatus.end())
+        return;
+
+    for (uint8 j = 0; j < QUEST_OBJECTIVES_COUNT; ++j)
+    {
+        if (qInfo->RequiredNpcOrGo[j] != entry || !itr->second.CreatureOrGOCount[j])
+            continue;
+
+        itr->second.CreatureOrGOCount[j] = 0;
+        m_QuestStatusSave[questId] = QUEST_DEFAULT_SAVE_TYPE;
+
+        uint16 slot = FindQuestSlot(questId);
+        if (slot < MAX_QUEST_LOG_SIZE)
+            SetQuestSlotCounter(slot, j, 0);
+    }
+
+    if (itr->second.Status == QUEST_STATUS_COMPLETE)
+        IncompleteQuest(questId);
+}
+
 void Player::AdjustQuestReqItemCount(Quest const* quest, QuestStatusData& questStatusData)
 {
     if (quest->HasSpecialFlag(QUEST_SPECIAL_FLAGS_DELIVER))

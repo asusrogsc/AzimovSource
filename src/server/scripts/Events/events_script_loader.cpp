@@ -21,6 +21,7 @@ void AddSC_event_fireworks();
 // Portés de TrinityCore cata_classic (Azimov)
 void AddSC_event_brewfest();
 void AddSC_event_darkmoon_faire();
+void AddSC_event_darkmoon_faire_jeux(); // Azimov : mini-jeux de l'île (SkyFire_548)
 void AddSC_event_hallows_end();
 void AddSC_event_love_is_in_the_air();
 void AddSC_event_lunar_festival();
@@ -38,6 +39,7 @@ void AddEventsScripts()
     AddSC_event_fireworks();
     AddSC_event_brewfest();
     AddSC_event_darkmoon_faire();
+    AddSC_event_darkmoon_faire_jeux();
     AddSC_event_hallows_end();
     AddSC_event_love_is_in_the_air();
     AddSC_event_lunar_festival();

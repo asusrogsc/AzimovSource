@@ -1406,6 +1406,7 @@ class TC_GAME_API Player : public Unit, public GridObject<Player>
         void SwapQuestSlot(uint16 slot1, uint16 slot2);
 
         uint16 GetReqKillOrCastCurrentCount(uint32 quest_id, int32 entry) const;
+        void ResetQuestObjectiveCount(uint32 questId, int32 entry); // Azimov : remise à zéro d'un objectif (mini-jeux de Sombrelune)
         void AreaExploredOrEventHappens(uint32 questId);
         void GroupEventHappens(uint32 questId, WorldObject const* pEventObject);
         void ItemAddedQuestCheck(uint32 entry, uint32 count);
