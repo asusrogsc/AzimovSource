@@ -29,6 +29,8 @@
 #include "Config.h"
 #include "Creature.h"
 #include "DBCStores.h"
+#include "GridNotifiers.h"
+#include "GridNotifiersImpl.h"
 #include "Group.h"
 #include "LFGMgr.h"
 #include "Log.h"
@@ -345,8 +347,43 @@ struct npc_azimov_sujet : public ScriptedAI
     }
 
     // Cible : celle du joueur, sinon un monstre qui attaque le groupe
+    // Joueur prisonnier (Tombeau de givre, Entoilage, cocon, bloc de glace…) : ces prisons sont des PNJ
+    // ennemis invoqués sur lui qu'il faut détruire. On cherche un PNJ invoqué attaquable à 4 m de lui, hors boss.
+    Unit* FindPrison(Player* owner) const
+    {
+        if (!owner->IsAlive())
+            return nullptr;
+        bool prisonnier = owner->HasUnitState(UNIT_STATE_STUNNED | UNIT_STATE_ROOT)
+            || owner->HasAuraType(SPELL_AURA_MOD_STUN) || owner->HasAuraType(SPELL_AURA_MOD_ROOT)
+            || owner->HasAuraType(SPELL_AURA_MOD_PACIFY) || owner->HasAuraType(SPELL_AURA_MOD_PACIFY_SILENCE);
+        if (!prisonnier)
+            return nullptr;
+
+        std::list<Unit*> proches;
+        Trinity::AnyUnfriendlyUnitInObjectRangeCheck check(owner, me, 4.0f);
+        Trinity::UnitListSearcher<Trinity::AnyUnfriendlyUnitInObjectRangeCheck> searcher(owner, proches, check);
+        Cell::VisitAllObjects(owner, searcher, 4.0f);
+
+        Unit* best = nullptr;
+        for (Unit* u : proches)
+        {
+            Creature* c = u->ToCreature();
+            if (!c || !CanFight(c) || c->IsDungeonBoss() || c->isWorldBoss())
+                continue;
+            // une prison est invoquée par un sort, ne bouge pas et n'attaque personne
+            // (un monstre ordinaire qui dort à côté du joueur ne doit pas être tiré)
+            if (!c->IsSummon() || c->GetVictim() || c->isMoving())
+                continue;
+            if (!best || owner->GetDistance(c) < owner->GetDistance(best))
+                best = c;
+        }
+        return best;
+    }
+
     Unit* PickEnemy(Player* owner, std::vector<Unit*> const& party) const
     {
+        if (Unit* prison = FindPrison(owner))
+            return prison;
         if (Unit* v = owner->GetVictim())
             if (CanFight(v) && v->IsInCombat())
                 return v;
@@ -574,7 +611,12 @@ struct npc_azimov_sujet : public ScriptedAI
             me->SetPower(POWER_MANA, me->GetMaxPower(POWER_MANA));
         }
 
-        if (!owner->IsAlive())
+        std::vector<Unit*> party = Party(owner);
+        Unit* enemy = PickEnemy(owner, party);
+
+        // Joueur mort : tant que des monstres frappent le groupe, les sujets continuent le combat (plus bas) ;
+        // une fois le combat fini, ils se regroupent près du corps et la soigneuse relève le joueur
+        if (!owner->IsAlive() && !enemy)
         {
             if (me->HasUnitState(UNIT_STATE_CASTING))
                 return;   // résurrection en cours : on ne bouge pas
@@ -590,9 +632,6 @@ struct npc_azimov_sujet : public ScriptedAI
             }
             return;
         }
-
-        std::vector<Unit*> party = Party(owner);
-        Unit* enemy = PickEnemy(owner, party);
 
         RegenMana(owner, enemy != nullptr);
 
