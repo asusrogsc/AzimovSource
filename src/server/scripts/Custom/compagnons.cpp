@@ -1795,5 +1795,5 @@ void AddSC_compagnons()
     new compagnons_playerscript();
     new compagnons_commandscript();
     new compagnons_unitscript();
-    RegisterCreatureAI(Compagnons::npc_gardien_compagnons);
+    new GenericCreatureScript<Compagnons::npc_gardien_compagnons>("npc_gardien_compagnons");   // nom sans "Compagnons::" (RegisterCreatureAI le garderait)
 }
