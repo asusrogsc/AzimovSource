@@ -88,6 +88,61 @@ namespace Compagnons
     // Réglages worldserver.conf (en %) : Azimov.Compagnons.Vie / .Degats / .DegatsSubis (tous les compagnons)
     // et Azimov.Compagnons.<Attaque|Tank|Soin>.Vie / .Degats / .DegatsSubis (par rôle), multipliés entre eux
     char const* const CONF_ROLE[] = { "Attaque", "Tank", "Soin" };
+    // Créatures spéciales (azworld2.azimov_compagnon_special) : plus fortes une fois capturées
+    struct Special { std::string titre; float vie = 1.0f, degats = 1.0f, subis = 1.0f; };
+    std::mutex gVerrouSpeciaux;
+    std::unordered_map<uint32, Special> gSpeciaux;
+    bool gSpeciauxCharges = false;
+
+    uint32 ChargerSpeciaux()
+    {
+        std::unordered_map<uint32, Special> lus;
+        if (QueryResult r = WorldDatabase.Query("SELECT entry, titre, vie_pct, degats_pct, degats_subis_pct FROM azimov_compagnon_special"))
+        {
+            do
+            {
+                Field* c = r->Fetch();
+                Special sp;
+                sp.titre = c[1].GetString();
+                sp.vie = std::max(0, c[2].GetInt32()) / 100.0f;
+                sp.degats = std::max(0, c[3].GetInt32()) / 100.0f;
+                sp.subis = std::max(0, c[4].GetInt32()) / 100.0f;
+                lus[c[0].GetUInt32()] = sp;
+            } while (r->NextRow());
+        }
+        std::lock_guard<std::mutex> lock(gVerrouSpeciaux);
+        gSpeciaux.swap(lus);
+        gSpeciauxCharges = true;
+        return uint32(gSpeciaux.size());
+    }
+
+    // copie du réglage spécial d'une créature (false si elle n'en a pas)
+    bool TrouverSpecial(uint32 entry, Special& sortie)
+    {
+        {
+            std::lock_guard<std::mutex> lock(gVerrouSpeciaux);
+            if (gSpeciauxCharges)
+            {
+                auto it = gSpeciaux.find(entry);
+                if (it == gSpeciaux.end())
+                    return false;
+                sortie = it->second;
+                return true;
+            }
+        }
+        ChargerSpeciaux();
+        return TrouverSpecial(entry, sortie);
+    }
+
+    float ReglageSpecial(uint32 entry, char const* nom)
+    {
+        Special sp;
+        if (!TrouverSpecial(entry, sp))
+            return 1.0f;
+        std::string n = nom;
+        return n == "Vie" ? sp.vie : n == "Degats" ? sp.degats : sp.subis;
+    }
+
     float Reglage(uint8 role, char const* nom)
     {
         float global = float(sConfigMgr->GetIntDefault(std::string("Azimov.Compagnons.") + nom, 100)) / 100.0f;
@@ -466,7 +521,7 @@ namespace Compagnons
         }
         float pct = c->GetMaxHealth() ? c->GetHealthPct() : 100.0f;
 
-        vie *= Reglage(f.role, "Vie");
+        vie *= Reglage(f.role, "Vie") * ReglageSpecial(f.entry, "Vie");
         float hp = VieDeBase(f.niveau) * vie;
         float ar = ArmureDeBase(f.niveau) * armure;
         // jamais plus faible que son maitre (a niveau egal) : suit l'equipement du joueur
@@ -474,7 +529,7 @@ namespace Compagnons
             if (maitre->GetTypeId() == TYPEID_PLAYER && maitre->getLevel() > 0)
             {
                 float part = std::min(1.0f, float(f.niveau) / float(maitre->getLevel()));
-                hp = std::max(hp, float(maitre->GetMaxHealth()) * vieMaitre * part * Reglage(f.role, "Vie"));
+                hp = std::max(hp, float(maitre->GetMaxHealth()) * vieMaitre * part * Reglage(f.role, "Vie") * ReglageSpecial(f.entry, "Vie"));
                 ar = std::max(ar, float(maitre->GetArmor()) * armureMaitre * part);
             }
 
@@ -1132,6 +1187,11 @@ class spell_compagnon_lasso : public SpellScript
         Sauver(p->GetGUID().GetCounter(), f, false);
 
         std::string nom = NomEntree(f.entry);
+        Special sp;
+        if (TrouverSpecial(f.entry, sp))
+            Dire(p, "|cffff8000[" + (sp.titre.empty() ? std::string("Cr\xC3\xA9" "ature sp\xC3\xA9" "ciale") : sp.titre) + "]|r " + nom
+                + " est plus puissant que les autres (vie " + std::to_string(int32(sp.vie * 100.0f + 0.5f)) + " %, d\xC3\xA9" "g\xC3\xA2" "ts "
+                + std::to_string(int32(sp.degats * 100.0f + 0.5f)) + " %, d\xC3\xA9" "g\xC3\xA2" "ts subis " + std::to_string(int32(sp.subis * 100.0f + 0.5f)) + " %).");
         c->DespawnOrUnsummon();
         Dire(p, "|cff40ff40Vous avez captur\xC3\xA9" " " + nom + " ! Il devient votre compagnon n\xC2\xB0" "" + std::to_string(f.slot + 1) + " (niveau 1, "
             + std::to_string(sortsDuMonstre) + " sort(s) appris du monstre).|r Ouvrez la fen\xC3\xAA" "tre Compagnons pour l'invoquer.");
@@ -1211,6 +1271,7 @@ public:
             { "sort",         rbac::RBAC_PERM_COMMAND_SAVE,    false, &SortCmd,      "" },
             { "stats",        rbac::RBAC_PERM_COMMAND_SAVE,    false, &StatsCmd,     "" },
             { "niveau",       rbac::RBAC_PERM_COMMAND_LEVELUP, false, &NiveauCmd,    "" },
+            { "speciaux",     rbac::RBAC_PERM_COMMAND_LEVELUP, false, &SpeciauxCmd,  "" },
         };
         static std::vector<ChatCommand> table =
         {
@@ -1220,6 +1281,13 @@ public:
     }
 
     static Player* Joueur(ChatHandler* h) { return h->GetSession() ? h->GetSession()->GetPlayer() : nullptr; }
+
+    // .compagnon speciaux : relit azimov_compagnon_special (MJ). Les compagnons déjà sortis changent à leur prochaine invocation.
+    static bool SpeciauxCmd(ChatHandler* h, char const* /*args*/)
+    {
+        h->PSendSysMessage("Compagnons : %u cr\xC3\xA9" "ature(s) sp\xC3\xA9" "ciale(s) charg\xC3\xA9" "e(s).", ChargerSpeciaux());
+        return true;
+    }
 
     static bool Liste(ChatHandler* h, char const* /*args*/)
     {
@@ -1548,7 +1616,7 @@ public:
         if (!c || !c->IsSummon())
             return 1.0f;
         if (Compagnons::CompagnonAI const* ai = dynamic_cast<Compagnons::CompagnonAI const*>(c->AI()))
-            return Compagnons::Reglage(ai->Role(), nom);
+            return Compagnons::Reglage(ai->Role(), nom) * Compagnons::ReglageSpecial(c->GetEntry(), nom);
         return 1.0f;
     }
 
@@ -1591,7 +1659,9 @@ namespace Compagnons
 
         static std::string Ligne(Fiche const& f)
         {
-            return NomEntree(f.entry) + " (niveau " + std::to_string(f.niveau) + ", " + NOMS_ROLE[std::min<uint8>(f.role, ROLE_SOIN)] + ")";
+            Special sp;
+            std::string titre = TrouverSpecial(f.entry, sp) ? " [" + (sp.titre.empty() ? std::string("Sp\xC3\xA9" "cial") : sp.titre) + "]" : "";
+            return NomEntree(f.entry) + titre + " (niveau " + std::to_string(f.niveau) + ", " + NOMS_ROLE[std::min<uint8>(f.role, ROLE_SOIN)] + ")";
         }
 
         bool GossipHello(Player* player) override
