@@ -42,6 +42,8 @@
 #include "TemporarySummon.h"
 #include "ThreatManager.h"
 #include "Util.h"
+#include "Config.h"
+#include "ScriptedGossip.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -77,6 +79,21 @@ namespace Compagnons
     uint32 const SORT_SOIN        = 41372;    // Soins (sur un allie)
 
     uint32 const SORTS_RESURRECTION[] = { 2006, 7328, 2008, 50769, 20484, 61999, 982 };
+
+    // Étable (PNJ « Gardien des compagnons ») : emplacements 100 à 100 + places - 1 de character_compagnon
+    uint8  const ETABLE_PREMIER        = 100;
+    uint8  const ETABLE_MAX            = 25;        // limite du menu de dialogue
+    uint8 PlacesEtable() { return uint8(std::clamp(sConfigMgr->GetIntDefault("Azimov.Compagnons.Etable.Places", 10), 0, int32(ETABLE_MAX))); }
+
+    // Réglages worldserver.conf (en %) : Azimov.Compagnons.Vie / .Degats / .DegatsSubis (tous les compagnons)
+    // et Azimov.Compagnons.<Attaque|Tank|Soin>.Vie / .Degats / .DegatsSubis (par rôle), multipliés entre eux
+    char const* const CONF_ROLE[] = { "Attaque", "Tank", "Soin" };
+    float Reglage(uint8 role, char const* nom)
+    {
+        float global = float(sConfigMgr->GetIntDefault(std::string("Azimov.Compagnons.") + nom, 100)) / 100.0f;
+        float parRole = float(sConfigMgr->GetIntDefault(std::string("Azimov.Compagnons.") + CONF_ROLE[std::min<uint8>(role, 2)] + "." + nom, 100)) / 100.0f;
+        return std::max(0.0f, global * parRole);
+    }
 
     enum Role : uint8 { ROLE_ATTAQUE = 0, ROLE_TANK = 1, ROLE_SOIN = 2 };
 
@@ -143,6 +160,7 @@ namespace Compagnons
     struct Donnees
     {
         std::map<uint8, Fiche> fiches;
+        std::map<uint8, Fiche> etable;   // compagnons rangés chez le Gardien des compagnons
         int8 actif = -1;           // emplacement du compagnon sorti (-1 : aucun)
         ObjectGuid invoque;        // creature actuellement invoquee
         bool charge = false;
@@ -295,7 +313,14 @@ namespace Compagnons
                 f.comportement = std::min<uint8>(c[6].GetUInt8(), COMP_PASSIF);
                 f.sorts = SortsDepuisTexte(c[7].GetString());
                 f.mortJusqua = c[8].GetUInt64();
-                if (f.slot >= NB_MAX || !sObjectMgr->GetCreatureTemplate(f.entry))
+                if (!sObjectMgr->GetCreatureTemplate(f.entry))
+                    continue;
+                if (f.slot >= ETABLE_PREMIER && f.slot < ETABLE_PREMIER + ETABLE_MAX)
+                {
+                    d.etable[f.slot] = f;
+                    continue;
+                }
+                if (f.slot >= NB_MAX)
                     continue;
                 if (c[9].GetUInt8())
                     d.actif = int8(f.slot);
@@ -441,6 +466,7 @@ namespace Compagnons
         }
         float pct = c->GetMaxHealth() ? c->GetHealthPct() : 100.0f;
 
+        vie *= Reglage(f.role, "Vie");
         float hp = VieDeBase(f.niveau) * vie;
         float ar = ArmureDeBase(f.niveau) * armure;
         // jamais plus faible que son maitre (a niveau egal) : suit l'equipement du joueur
@@ -448,7 +474,7 @@ namespace Compagnons
             if (maitre->GetTypeId() == TYPEID_PLAYER && maitre->getLevel() > 0)
             {
                 float part = std::min(1.0f, float(f.niveau) / float(maitre->getLevel()));
-                hp = std::max(hp, float(maitre->GetMaxHealth()) * vieMaitre * part);
+                hp = std::max(hp, float(maitre->GetMaxHealth()) * vieMaitre * part * Reglage(f.role, "Vie"));
                 ar = std::max(ar, float(maitre->GetArmor()) * armureMaitre * part);
             }
 
@@ -516,6 +542,7 @@ namespace Compagnons
         }
 
         Player* Maitre() const { return ObjectAccessor::GetPlayer(*me, _owner); }
+        uint8 Role() const { return _fiche.role; }
 
         void Suivre()
         {
@@ -1506,9 +1533,197 @@ public:
     }
 };
 
+// ---------------------------------------------------------------- réglages de dégâts
+// Azimov.Compagnons[.<Role>].Degats : dégâts infligés ; .DegatsSubis : dégâts reçus (mêlée, sorts, effets périodiques)
+class compagnons_unitscript : public UnitScript
+{
+public:
+    compagnons_unitscript() : UnitScript("compagnons_unitscript") { }
+
+    static float Facteur(Unit const* u, char const* nom)
+    {
+        if (!u)
+            return 1.0f;
+        Creature const* c = u->ToCreature();
+        if (!c || !c->IsSummon())
+            return 1.0f;
+        if (Compagnons::CompagnonAI const* ai = dynamic_cast<Compagnons::CompagnonAI const*>(c->AI()))
+            return Compagnons::Reglage(ai->Role(), nom);
+        return 1.0f;
+    }
+
+    static float Total(Unit* target, Unit* attacker) { return Facteur(attacker, "Degats") * Facteur(target, "DegatsSubis"); }
+
+    void ModifyMeleeDamage(Unit* target, Unit* attacker, uint32& damage) override
+    {
+        if (float f = Total(target, attacker); f != 1.0f)
+            damage = uint32(float(damage) * f);
+    }
+
+    void ModifySpellDamageTaken(Unit* target, Unit* attacker, int32& damage) override
+    {
+        if (damage > 0)
+            if (float f = Total(target, attacker); f != 1.0f)
+                damage = int32(float(damage) * f);
+    }
+
+    void ModifyPeriodicDamageAurasTick(Unit* target, Unit* attacker, uint32& damage) override
+    {
+        if (float f = Total(target, attacker); f != 1.0f)
+            damage = uint32(float(damage) * f);
+    }
+};
+
+// ---------------------------------------------------------------- Gardien des compagnons (étable)
+// Déposer un compagnon de l'équipe (5 places) dans l'étable, ou le reprendre. Places : Azimov.Compagnons.Etable.Places
+namespace Compagnons
+{
+    enum GardienActions : uint32
+    {
+        GARDIEN_DEPOSER = 1000,   // + emplacement d'équipe
+        GARDIEN_RETIRER = 2000,   // + emplacement d'étable
+        GARDIEN_FERMER  = 3000,
+    };
+
+    struct npc_gardien_compagnons : public ScriptedAI
+    {
+        npc_gardien_compagnons(Creature* creature) : ScriptedAI(creature) { }
+
+        static std::string Ligne(Fiche const& f)
+        {
+            return NomEntree(f.entry) + " (niveau " + std::to_string(f.niveau) + ", " + NOMS_ROLE[std::min<uint8>(f.role, ROLE_SOIN)] + ")";
+        }
+
+        bool GossipHello(Player* player) override
+        {
+            ClearGossipMenuFor(player);
+            uint8 places = PlacesEtable();
+            Donnees d;
+            {
+                std::lock_guard<std::mutex> lock(gVerrou);
+                auto it = gDonnees.find(player->GetGUID().GetCounter());
+                if (it != gDonnees.end())
+                    d = it->second;
+            }
+            bool etablePleine = d.etable.size() >= places;
+            bool equipePleine = d.fiches.size() >= NB_MAX;
+            for (auto const& [slot, f] : d.fiches)
+                if (!etablePleine)
+                    AddGossipItemFor(player, GOSSIP_ICON_INTERACT_1, "D\xC3\xA9" "poser : " + Ligne(f), GOSSIP_SENDER_MAIN, GARDIEN_DEPOSER + slot);
+            for (auto const& [slot, f] : d.etable)
+                if (!equipePleine)
+                    AddGossipItemFor(player, GOSSIP_ICON_INTERACT_2, "Reprendre : " + Ligne(f), GOSSIP_SENDER_MAIN, GARDIEN_RETIRER + slot);
+            AddGossipItemFor(player, GOSSIP_ICON_CHAT, "Au revoir.", GOSSIP_SENDER_MAIN, GARDIEN_FERMER);
+
+            std::string etat = "|cffffd100\xC3\x89" "table : " + std::to_string(d.etable.size()) + " / " + std::to_string(places)
+                + " - \xC3\x89" "quipe : " + std::to_string(d.fiches.size()) + " / " + std::to_string(NB_MAX) + "|r";
+            if (etablePleine)
+                etat += " (\xC3\xA9" "table pleine)";
+            if (equipePleine && !d.etable.empty())
+                etat += " (\xC3\xA9" "quipe pleine : d\xC3\xA9" "posez d'abord un compagnon)";
+            Dire(player, etat);
+            SendGossipMenuFor(player, DEFAULT_GOSSIP_MESSAGE, me->GetGUID());
+            return true;
+        }
+
+        bool GossipSelect(Player* player, uint32 /*menuId*/, uint32 gossipListId) override
+        {
+            uint32 action = GetGossipActionFor(player, gossipListId);
+            CloseGossipMenuFor(player);
+            if (action >= GARDIEN_RETIRER && action < GARDIEN_FERMER)
+                Reprendre(player, uint8(action - GARDIEN_RETIRER));
+            else if (action >= GARDIEN_DEPOSER && action < GARDIEN_RETIRER)
+                Deposer(player, uint8(action - GARDIEN_DEPOSER));
+            else
+                return true;
+            GossipHello(player);
+            return true;
+        }
+
+        void Deposer(Player* player, uint8 slot)
+        {
+            ObjectGuid::LowType owner = player->GetGUID().GetCounter();
+            bool etaitActif = false;
+            {
+                std::lock_guard<std::mutex> lock(gVerrou);
+                auto it = gDonnees.find(owner);
+                if (it == gDonnees.end() || !it->second.fiches.count(slot))
+                    return;
+                etaitActif = it->second.actif == int8(slot);
+            }
+            if (etaitActif)
+                Renvoyer(player, true);   // le compagnon sorti rentre d'abord
+
+            Fiche f;
+            {
+                std::lock_guard<std::mutex> lock(gVerrou);
+                Donnees& d = gDonnees[owner];
+                auto fi = d.fiches.find(slot);
+                if (fi == d.fiches.end())
+                    return;
+                uint8 places = PlacesEtable(), libre = 0;
+                for (uint8 i = 0; i < places; ++i)
+                    if (!d.etable.count(ETABLE_PREMIER + i))
+                    {
+                        libre = ETABLE_PREMIER + i;
+                        break;
+                    }
+                if (!libre)
+                {
+                    Dire(player, "|cffff6060L'\xC3\xA9" "table est pleine.|r");
+                    return;
+                }
+                f = fi->second;
+                d.fiches.erase(fi);
+                f.slot = libre;
+                d.etable[libre] = f;
+            }
+            Sauver(owner, f, false);
+            Effacer(owner, slot);
+            Dire(player, "|cff40ff40" + NomEntree(f.entry) + " est rang\xC3\xA9" " \xC3\xA0" " l'\xC3\xA9" "table.|r");
+            EnvoyerListe(player);
+        }
+
+        void Reprendre(Player* player, uint8 slotEtable)
+        {
+            ObjectGuid::LowType owner = player->GetGUID().GetCounter();
+            Fiche f;
+            {
+                std::lock_guard<std::mutex> lock(gVerrou);
+                Donnees& d = gDonnees[owner];
+                auto fi = d.etable.find(slotEtable);
+                if (fi == d.etable.end())
+                    return;
+                uint8 libre = NB_MAX;
+                for (uint8 i = 0; i < NB_MAX; ++i)
+                    if (!d.fiches.count(i))
+                    {
+                        libre = i;
+                        break;
+                    }
+                if (libre == NB_MAX)
+                {
+                    Dire(player, "|cffff6060Votre \xC3\xA9" "quipe est compl\xC3\xA8" "te (5). D\xC3\xA9" "posez d'abord un compagnon.|r");
+                    return;
+                }
+                f = fi->second;
+                d.etable.erase(fi);
+                f.slot = libre;
+                d.fiches[libre] = f;
+            }
+            Sauver(owner, f, false);
+            Effacer(owner, slotEtable);
+            Dire(player, "|cff40ff40" + NomEntree(f.entry) + " rejoint votre \xC3\xA9" "quipe (emplacement " + std::to_string(f.slot + 1) + ").|r");
+            EnvoyerListe(player);
+        }
+    };
+}
+
 void AddSC_compagnons()
 {
     RegisterSpellScript(spell_compagnon_lasso);
     new compagnons_playerscript();
     new compagnons_commandscript();
+    new compagnons_unitscript();
+    RegisterCreatureAI(Compagnons::npc_gardien_compagnons);
 }

@@ -170,6 +170,20 @@ namespace
     }
 
     // Place les sujets manquants (ou morts) autour du joueur. Le joueur doit être dans le donjon du groupe.
+    // Niveau du joueur + statistiques de ce niveau + points de vie par rôle (Azimov.Sujets.<Role>.Vie)
+    void ApplySujetLevel(Creature* sujet, uint8 level)
+    {
+        sujet->SetLevel(level);
+        sujet->UpdateLevelDependantStats();
+        if (float vie = RolePct(sujet, "Vie"); vie != 1.0f)
+        {
+            uint32 health = std::max<uint32>(1, uint32(float(sujet->GetCreateHealth()) * vie));
+            sujet->SetCreateHealth(health);
+            sujet->SetStatFlatModifier(UNIT_MOD_HEALTH, BASE_VALUE, float(health));
+            sujet->UpdateMaxHealth();
+        }
+    }
+
     void EnsureFollowers(Player* player)
     {
         std::vector<std::pair<size_t, uint32>> missing;
@@ -208,16 +222,7 @@ namespace
             if (sConfigMgr->GetBoolDefault("Azimov.Sujets.Skada", false))
                 sujet->SetCreatorGUID(player->GetGUID());
             sujet->SetFaction(player->GetFaction());
-            sujet->SetLevel(player->getLevel());
-            sujet->UpdateLevelDependantStats();
-            // Points de vie par rôle (Azimov.Sujets.<Role>.Vie)
-            if (float vie = RolePct(sujet, "Vie"); vie != 1.0f)
-            {
-                uint32 health = std::max<uint32>(1, uint32(float(sujet->GetCreateHealth()) * vie));
-                sujet->SetCreateHealth(health);
-                sujet->SetStatFlatModifier(UNIT_MOD_HEALTH, BASE_VALUE, float(health));
-                sujet->UpdateMaxHealth();
-            }
+            ApplySujetLevel(sujet, player->getLevel());
             sujet->SetFullHealth();
             sujet->SetPower(POWER_MANA, sujet->GetMaxPower(POWER_MANA));
             sujet->GetMotionMaster()->MoveFollow(player, 2.5f, AngleFor(m.second));
@@ -559,11 +564,14 @@ struct npc_azimov_sujet : public ScriptedAI
         if (owner->IsAlive() && RejoinIfStuck(owner))
             return;
 
-        // Le joueur a pris un niveau : hors combat, le sujet disparaît et revient à son niveau (EnsureFollowers)
+        // Le joueur a pris un niveau : hors combat, le sujet passe à son niveau sur place, vie au même pourcentage
+        // (ne plus le faire disparaître : si les 4 disparaissaient ensemble, plus personne ne les rappelait)
         if (me->getLevel() != owner->getLevel() && !me->IsInCombat() && !owner->IsInCombat())
         {
-            me->DespawnOrUnsummon();
-            return;
+            float pct = me->GetHealthPct();
+            ApplySujetLevel(me, owner->getLevel());
+            me->SetHealth(std::max<uint32>(1, uint32(me->GetMaxHealth() * pct / 100.0f)));
+            me->SetPower(POWER_MANA, me->GetMaxPower(POWER_MANA));
         }
 
         if (!owner->IsAlive())
