@@ -405,32 +405,36 @@ struct npc_azimov_sujet : public ScriptedAI
         me->SetStandState(UNIT_STAND_STATE_STAND);
     }
 
+    // Ascenseur, téléporteur, chute, sujet passé sous le sol : trop loin ou trop haut/bas -> il rejoint le joueur.
+    // L'écart doit durer 3 s hors combat, 5 s en combat (un simple dénivelé ou un joueur qui court devant
+    // ne doit pas le faire clignoter). Jamais pendant que le joueur est sur un transport en mouvement.
+    // Appelé à chaque réflexion, en combat aussi (boss du Donjon d'Utgarde : sujets passés hors de la carte).
+    bool RejoinIfStuck(Player* owner)
+    {
+        bool tooFar = false;
+        if (!owner->GetTransport() && !_drinking)
+        {
+            float dz = std::fabs(me->GetPositionZ() - owner->GetPositionZ());
+            float dist = me->GetDistance(owner);
+            tooFar = dist > 60.0f || (dz > 15.0f && me->GetDistance2d(owner) < 25.0f) || !me->IsPositionValid();
+        }
+        _farTime = tooFar ? _farTime + 500 : 0;
+        bool fight = me->IsInCombat() || owner->IsInCombat();
+        if (_farTime < (fight ? 5000u : 3000u))
+            return false;
+
+        _farTime = 0;
+        Position pos = owner->GetPosition();
+        owner->MovePositionToFirstCollision(pos, 2.5f, AngleFor(me->GetEntry()));
+        me->NearTeleportTo(pos.GetPositionX(), pos.GetPositionY(), pos.GetPositionZ(), owner->GetOrientation());
+        me->GetMotionMaster()->Clear();
+        return true;
+    }
+
     void FollowOwner(Player* owner)
     {
         if (me->GetVictim())
             me->AttackStop();
-
-        // Ascenseur, téléporteur, chute : trop loin ou trop haut/bas -> on rejoint le joueur
-        // (pas pendant qu'il est encore sur l'ascenseur en mouvement, ni pendant un combat)
-        // Il faut que l'écart dure 3 s (le sujet n'arrive pas à suivre) : un simple dénivelé ou un joueur
-        // qui court devant ne doit pas le faire clignoter (une téléportation = disparition/réapparition à l'écran)
-        bool tooFar = false;
-        if (!owner->GetTransport() && !me->IsInCombat() && !owner->IsInCombat())
-        {
-            float dz = std::fabs(me->GetPositionZ() - owner->GetPositionZ());
-            tooFar = me->GetDistance(owner) > 60.0f || (dz > 15.0f && me->GetDistance2d(owner) < 25.0f);
-        }
-        _farTime = tooFar ? _farTime + 500 : 0;
-        if (_farTime >= 3000)
-        {
-            _farTime = 0;
-            {
-                Position pos = owner->GetPosition();
-                owner->MovePositionToFirstCollision(pos, 2.5f, AngleFor(me->GetEntry()));
-                me->NearTeleportTo(pos.GetPositionX(), pos.GetPositionY(), pos.GetPositionZ(), owner->GetOrientation());
-                me->GetMotionMaster()->Clear();
-            }
-        }
 
         if (me->GetMotionMaster()->GetCurrentMovementGeneratorType() != FOLLOW_MOTION_TYPE)
             me->GetMotionMaster()->MoveFollow(owner, 2.5f, AngleFor(me->GetEntry()));
@@ -551,6 +555,9 @@ struct npc_azimov_sujet : public ScriptedAI
         // Après un charme, le cœur remet la faction du gabarit : on reprend celle du joueur
         if (!me->IsCharmed() && me->GetFaction() != owner->GetFaction())
             me->SetFaction(owner->GetFaction());
+
+        if (owner->IsAlive() && RejoinIfStuck(owner))
+            return;
 
         // Le joueur a pris un niveau : hors combat, le sujet disparaît et revient à son niveau (EnsureFollowers)
         if (me->getLevel() != owner->getLevel() && !me->IsInCombat() && !owner->IsInCombat())

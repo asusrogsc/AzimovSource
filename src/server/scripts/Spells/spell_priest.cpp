@@ -29,6 +29,9 @@
 #include "SpellMgr.h"
 #include "SpellScript.h"
 #include "TemporarySummon.h"
+#include "MotionMaster.h"
+#include "ObjectAccessor.h"
+#include "ScriptedCreature.h"
 
 namespace Spells::Priest
 {
@@ -1848,11 +1851,148 @@ class spell_pri_silence : public SpellScript
         OnEffectHitTarget.Register(&spell_pri_silence::HandleCreatureInterrupt, EFFECT_0, SPELL_EFFECT_APPLY_AURA);
     }
 };
+// Azimov : Apparition ténébreuse (talent 78202 / 78203 / 78204), absente du fork et de TC cata_classic
+// - Mot de l'ombre : Douleur (589), à chaque tick : $s1 % de chances (x5 en mouvement) d'invoquer une apparition (PNJ 46954)
+// - L'apparition prend l'apparence du prêtre (87213), glisse vers la cible, et le prêtre lui inflige 87532 à l'arrivée
+// - 4 apparitions au plus par prêtre
+enum ShadowyApparition
+{
+    SPELL_PRIEST_SHADOWY_APPARITION_R1      = 78202,
+    SPELL_PRIEST_SHADOWY_APPARITION_R2      = 78203,
+    SPELL_PRIEST_SHADOWY_APPARITION_R3      = 78204,
+    SPELL_PRIEST_SHADOWY_APPARITION_CLONE   = 87213,   // aura 247 (clone du lanceur)
+    SPELL_PRIEST_SHADOWY_APPARITION_VISUAL  = 87427,
+    SPELL_PRIEST_SHADOWY_APPARITION_DEATH   = 87529,
+    SPELL_PRIEST_SHADOWY_APPARITION_DAMAGE  = 87532,
+    NPC_PRIEST_SHADOWY_APPARITION           = 46954,
+    SHADOWY_APPARITION_MAX                  = 4,
+};
+
+// 589 - Mot de l'ombre : Douleur
+class spell_pri_shadow_word_pain_apparition : public AuraScript
+{
+    void HandlePeriodic(AuraEffect const* /*aurEff*/)
+    {
+        Unit* caster = GetCaster();
+        Unit* target = GetTarget();
+        if (!caster || !target || !caster->IsPlayer() || !target->IsAlive())
+            return;
+
+        int32 chance = 0;
+        for (uint32 spellId : { SPELL_PRIEST_SHADOWY_APPARITION_R3, SPELL_PRIEST_SHADOWY_APPARITION_R2, SPELL_PRIEST_SHADOWY_APPARITION_R1 })
+            if (AuraEffect const* talent = caster->GetAuraEffect(spellId, EFFECT_0))
+            {
+                chance = talent->GetAmount();
+                break;
+            }
+        if (chance <= 0)
+            return;
+        if (caster->isMoving())
+            chance *= 5;
+        if (!roll_chance_i(chance))
+            return;
+
+        std::list<Creature*> apparitions;
+        caster->GetCreatureListWithEntryInGrid(apparitions, NPC_PRIEST_SHADOWY_APPARITION, 100.0f);
+        uint32 count = 0;
+        for (Creature* apparition : apparitions)
+            if (apparition->IsSummon() && apparition->ToTempSummon()->GetSummonerGUID() == caster->GetGUID())
+                ++count;
+        if (count >= SHADOWY_APPARITION_MAX)
+            return;
+
+        Position pos = caster->GetPosition();
+        caster->MovePositionToFirstCollision(pos, 1.5f, float(M_PI) / 4.0f);
+        if (TempSummon* apparition = caster->SummonCreature(NPC_PRIEST_SHADOWY_APPARITION, pos, TEMPSUMMON_TIMED_DESPAWN, 15000))
+            if (apparition->AI())
+                apparition->AI()->SetGUID(target->GetGUID());
+    }
+
+    void Register() override
+    {
+        OnEffectPeriodic.Register(&spell_pri_shadow_word_pain_apparition::HandlePeriodic, EFFECT_0, SPELL_AURA_PERIODIC_DAMAGE);
+    }
+};
+
+// 46954 - Apparition ténébreuse
+struct npc_pri_shadowy_apparition : public ScriptedAI
+{
+    npc_pri_shadowy_apparition(Creature* creature) : ScriptedAI(creature) { }
+
+    void IsSummonedBy(Unit* summoner) override
+    {
+        _ownerGuid = summoner->GetGUID();
+        me->SetFaction(summoner->GetFaction());
+        me->SetReactState(REACT_PASSIVE);
+        me->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NOT_SELECTABLE | UNIT_FLAG_NON_ATTACKABLE);
+        summoner->CastSpell(me, SPELL_PRIEST_SHADOWY_APPARITION_CLONE, true);
+        DoCastSelf(SPELL_PRIEST_SHADOWY_APPARITION_VISUAL, true);
+        me->SetWalk(true);
+        me->SetSpeedRate(MOVE_WALK, 1.0f);
+    }
+
+    void SetGUID(ObjectGuid const& guid, int32 /*id*/ = 0) override
+    {
+        _targetGuid = guid;
+        if (Unit* target = ObjectAccessor::GetUnit(*me, _targetGuid))
+            me->GetMotionMaster()->MoveFollow(target, 0.0f, 0.0f);
+    }
+
+    void EnterEvadeMode(EvadeReason /*why*/) override { }
+    void MoveInLineOfSight(Unit* /*who*/) override { }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (_done)
+            return;
+
+        if (_checkTimer > diff)
+        {
+            _checkTimer -= diff;
+            return;
+        }
+        _checkTimer = 200;
+
+        Unit* owner = ObjectAccessor::GetUnit(*me, _ownerGuid);
+        Unit* target = ObjectAccessor::GetUnit(*me, _targetGuid);
+        if (!owner || !target || !target->IsAlive())
+        {
+            Vanish();
+            return;
+        }
+
+        if (me->IsWithinDist(target, 2.0f, false) || me->IsWithinMeleeRange(target))
+        {
+            owner->CastSpell(target, SPELL_PRIEST_SHADOWY_APPARITION_DAMAGE, true);
+            Vanish();
+        }
+        else if (me->GetMotionMaster()->GetCurrentMovementGeneratorType() != FOLLOW_MOTION_TYPE)
+            me->GetMotionMaster()->MoveFollow(target, 0.0f, 0.0f);
+    }
+
+    void Vanish()
+    {
+        _done = true;
+        me->GetMotionMaster()->Clear();
+        me->StopMoving();
+        DoCastSelf(SPELL_PRIEST_SHADOWY_APPARITION_DEATH, true);
+        me->DespawnOrUnsummon(1000);
+    }
+
+private:
+    ObjectGuid _ownerGuid;
+    ObjectGuid _targetGuid;
+    uint32 _checkTimer = 200;
+    bool _done = false;
+};
+
 }
 
 void AddSC_priest_spell_scripts()
 {
     using namespace Spells::Priest;
+    RegisterSpellScript(spell_pri_shadow_word_pain_apparition);
+    RegisterCreatureAI(npc_pri_shadowy_apparition);
     RegisterSpellScript(spell_pri_archangel);
     RegisterSpellScript(spell_pri_atonement);
     RegisterSpellScript(spell_pri_atonement_heal);
