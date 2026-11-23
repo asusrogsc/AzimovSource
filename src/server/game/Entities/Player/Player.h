@@ -1781,10 +1781,13 @@ class TC_GAME_API Player : public Unit, public GridObject<Player>
 
         // CustomStats : Polyvalence / Raffinage
         int32 GetCustomVersatilityRating() const { return int32(std::max(0, m_customVersatilityRating) * m_azimovAllStatsMult); }
-        int32 GetCustomRefiningRating() const { return int32(std::max(0, m_customRefiningRating) * m_azimovAllStatsMult); }
+        int32 GetCustomRefiningRating() const { return int32(std::max(0, m_customRefiningRating) * m_azimovAllStatsMult * m_azimovRefiningMult); }
         // Azimov : multiplicateur de toutes les stats (talents Azimov) : caractéristiques, scores, Polyvalence, Raffinage
         float GetAzimovAllStatsMult() const { return m_azimovAllStatsMult; }
         void SetAzimovAllStatsMult(float mult) { m_azimovAllStatsMult = mult; }
+        // Azimov : multiplicateur du score de Raffinage seul, toutes sources (talent « Maître raffineur »)
+        float GetAzimovRefiningMult() const { return m_azimovRefiningMult; }
+        void SetAzimovRefiningMult(float mult) { m_azimovRefiningMult = mult; }
         void ApplyCustomVersatilityRating(int32 value, bool apply) { m_customVersatilityRating += apply ? value : -value; }
         void ApplyCustomRefiningRating(int32 value, bool apply) { m_customRefiningRating += apply ? value : -value; }
         void UpdateRating(CombatRating cr);
@@ -2731,6 +2734,7 @@ class TC_GAME_API Player : public Unit, public GridObject<Player>
         int32 m_customVersatilityRating = 0;
         int32 m_customRefiningRating = 0;
         float m_azimovAllStatsMult = 1.0f;
+        float m_azimovRefiningMult = 1.0f;
         // internal common parts for CanStore/StoreItem functions
         InventoryResult CanStoreItem_InSpecificSlot(uint8 bag, uint8 slot, ItemPosCountVec& dest, ItemTemplate const* pProto, uint32& count, bool swap, Item* pSrcItem) const;
         InventoryResult CanStoreItem_InBag(uint8 bag, ItemPosCountVec& dest, ItemTemplate const* pProto, uint32& count, bool merge, bool non_specialized, Item* pSrcItem, uint8 skip_bag, uint8 skip_slot) const;

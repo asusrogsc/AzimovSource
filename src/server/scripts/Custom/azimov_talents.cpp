@@ -124,6 +124,7 @@ namespace
         uint8  lightProc = 0;     // 1 = Frappe de lumière (cible), 2 = Lumière éclatante (5 ennemis)
         float  allStatsPct = 0.0f; // % en plus sur toutes les stats (caractéristiques, scores, Polyvalence, Raffinage)
         uint8  bookPct = 0;       // maj15 : % de chances en plus de trouver un livre de métier (cumulable)
+        float  refiningPct = 0.0f; // maj16 : % en plus sur tout le score de Raffinage, toutes sources (Maître raffineur)
         std::string name;
         std::string icon;
         std::string description;
@@ -166,7 +167,7 @@ namespace
     {
         s_talents.clear();
         QueryResult result = WorldDatabase.Query(
-            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags, harvest_keep, haste, crit, dmg_pct, leech_pct, power_pct, gather_restore, light_proc, all_stats_pct, book_pct FROM azimov_talent");
+            "SELECT id, path, position, cost, heroic, choice_group, spell_id, name, icon, description, versa, refining, flags, harvest_keep, haste, crit, dmg_pct, leech_pct, power_pct, gather_restore, light_proc, all_stats_pct, book_pct, refining_pct FROM azimov_talent");
         if (result)
         {
             do
@@ -196,6 +197,7 @@ namespace
                 t.lightProc   = f[20].GetUInt8();
                 t.allStatsPct = f[21].GetFloat();
                 t.bookPct     = f[22].GetUInt8();
+                t.refiningPct = f[23].GetFloat();
 
                 if (t.spellId && !sSpellMgr->GetSpellInfo(t.spellId))
                 {
@@ -244,7 +246,7 @@ namespace
         int32 versa = 0, refining = 0, haste = 0, crit = 0;
         float dmgPct = 0.0f, leechPct = 0.0f;
         uint8 flags = 0, lightProc = 0;
-        float allStatsPct = 0.0f;
+        float allStatsPct = 0.0f, refiningPct = 0.0f;
         for (uint32 id : owned)
             if (AzTalent const* t = GetTalent(id))
             {
@@ -257,6 +259,7 @@ namespace
                 leechPct += t->leechPct;
                 lightProc |= t->lightProc;
                 allStatsPct += t->allStatsPct;
+                refiningPct += t->refiningPct;
             }
 
         // Raffinage d'expert : meilleur métier de récolte (herboristerie, minage, dépeçage) / 10
@@ -305,6 +308,14 @@ namespace
             player->SetAzimovAllStatsMult(mult);
             player->GetStats().UpdateTotalStatMultiplier(StatType::AllPrimaryStats);
             player->UpdateAllRatings();
+        }
+
+        // Maître raffineur (+X % de tout le Raffinage) : multiplicateur du cœur
+        float refMult = 1.0f + refiningPct / 100.0f;
+        if (std::fabs(player->GetAzimovRefiningMult() - refMult) > 0.0001f)
+        {
+            player->SetAzimovRefiningMult(refMult);
+            multChanged = true;
         }
 
         if (versa != old.versa || refining != old.refining || multChanged)
@@ -629,7 +640,7 @@ namespace
             AzTalent const& t = kv.second;
             char head[96];
             snprintf(head, sizeof(head), "D:%u~%u~%u~%u~%u~%u~%u~", t.id, t.path, t.position, t.cost,
-                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining || t.flags || t.harvestKeep || t.haste || t.crit || t.dmgPct > 0.0f || t.leechPct > 0.0f || t.powerPct > 0.0f || t.gatherRestore || t.lightProc || t.allStatsPct > 0.0f || t.bookPct) ? 1 : 0);
+                t.heroic ? 1 : 0, t.choiceGroup, (t.spellId || t.versa || t.refining || t.flags || t.harvestKeep || t.haste || t.crit || t.dmgPct > 0.0f || t.leechPct > 0.0f || t.powerPct > 0.0f || t.gatherRestore || t.lightProc || t.allStatsPct > 0.0f || t.bookPct || t.refiningPct > 0.0f) ? 1 : 0);
             Send(player, Utf8Cut(std::string(head) + t.icon + "~" + t.name, 250));
             if (!t.description.empty())
                 Send(player, Utf8Cut("T:" + std::to_string(t.id) + "~" + t.description, 250));
