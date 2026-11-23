@@ -298,7 +298,15 @@ namespace
 // IA commune des sujets
 struct npc_azimov_sujet : public ScriptedAI
 {
-    npc_azimov_sujet(Creature* creature) : ScriptedAI(creature), _thinkTimer(500), _summonTimer(5000), _drinking(false), _statusTimer(0) { }
+    npc_azimov_sujet(Creature* creature) : ScriptedAI(creature), _thinkTimer(500), _summonTimer(5000), _drinking(false), _statusTimer(0)
+    {
+        // Les sujets ne doivent jamais passer sous le contrôle d'un monstre (Totem de charme du Contrôleur perdu
+        // dans le temps, Salles des Sethekk : sujet « Inconnu », impossible à cibler ou à soigner) ni être rétrécis.
+        for (uint32 aura : { SPELL_AURA_MOD_CHARM, SPELL_AURA_AOE_CHARM, SPELL_AURA_MOD_POSSESS, SPELL_AURA_MOD_SCALE })
+            me->ApplySpellImmune(0, IMMUNITY_STATE, aura, true);
+        me->ApplySpellImmune(0, IMMUNITY_MECHANIC, MECHANIC_CHARM, true);
+        me->ApplySpellImmune(0, IMMUNITY_ID, 35013, true);   // Rétrécir (Contrôleur perdu dans le temps) : -dégâts
+    }
 
     Player* Owner() const
     {
@@ -498,6 +506,16 @@ struct npc_azimov_sujet : public ScriptedAI
 
     void MoveInLineOfSight(Unit* /*who*/) override { }   // pas d'aggro spontanée
 
+    // Fin d'un charme : pas d'attaque automatique du dernier « charmeur » (comportement par défaut de CreatureAI)
+    void OnCharmed(bool /*isNew*/) override
+    {
+        if (!me->IsCharmed())
+        {
+            me->LastCharmerGUID.Clear();
+            me->CombatStop(true);
+        }
+    }
+
     void UpdateAI(uint32 diff) override
     {
         Player* owner = Owner();
@@ -526,6 +544,20 @@ struct npc_azimov_sujet : public ScriptedAI
             return;
         }
         _thinkTimer = 500;
+
+        // Charmé malgré tout (aura posée avant ce correctif) : on rend le sujet au joueur
+        if (me->IsCharmed())
+            me->RemoveCharmAuras();
+        // Après un charme, le cœur remet la faction du gabarit : on reprend celle du joueur
+        if (!me->IsCharmed() && me->GetFaction() != owner->GetFaction())
+            me->SetFaction(owner->GetFaction());
+
+        // Le joueur a pris un niveau : hors combat, le sujet disparaît et revient à son niveau (EnsureFollowers)
+        if (me->getLevel() != owner->getLevel() && !me->IsInCombat() && !owner->IsInCombat())
+        {
+            me->DespawnOrUnsummon();
+            return;
+        }
 
         if (!owner->IsAlive())
         {
