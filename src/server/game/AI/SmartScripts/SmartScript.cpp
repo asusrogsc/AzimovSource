@@ -2813,14 +2813,17 @@ void SmartScript::GetTargets(ObjectVector& targets, SmartScriptHolder const& e, 
         }
         case SMART_TARGET_CLOSEST_CREATURE:
         {
-            if (Creature* target = baseObject->FindNearestCreature(e.target.closest.entry, float(e.target.closest.dist ? e.target.closest.dist : 100), !e.target.closest.dead))
-                targets.push_back(target);
+            // Azimov: areatrigger scripts have no base object -> search around the triggering player (Stormwind cathedral crash)
+            if (WorldObject* ref = baseObject ? baseObject : scriptTrigger)
+                if (Creature* target = ref->FindNearestCreature(e.target.closest.entry, float(e.target.closest.dist ? e.target.closest.dist : 100), !e.target.closest.dead))
+                    targets.push_back(target);
             break;
         }
         case SMART_TARGET_CLOSEST_GAMEOBJECT:
         {
-            if (GameObject* target = baseObject->FindNearestGameObject(e.target.closest.entry, float(e.target.closest.dist ? e.target.closest.dist : 100)))
-                targets.push_back(target);
+            if (WorldObject* ref = baseObject ? baseObject : scriptTrigger)
+                if (GameObject* target = ref->FindNearestGameObject(e.target.closest.entry, float(e.target.closest.dist ? e.target.closest.dist : 100)))
+                    targets.push_back(target);
             break;
         }
         case SMART_TARGET_CLOSEST_PLAYER:
