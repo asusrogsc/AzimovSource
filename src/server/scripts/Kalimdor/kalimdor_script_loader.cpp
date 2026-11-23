@@ -146,10 +146,12 @@ void AddSC_boss_ragnaros_firelands();
 void AddSC_ashenvale();
 void AddSC_azuremyst_isle();
 void AddSC_bloodmyst_isle();
+void AddSC_darkshore();                      // Azimov : porté de SkyFire_548
 void AddSC_desolace();
 void AddSC_durotar();
 void AddSC_durotar_cata();
 void AddSC_dustwallow_marsh();
+void AddSC_teldrassil();                     // Azimov : porté de SkyFire_548
 void AddSC_felwood();
 void AddSC_moonglade();
 void AddSC_mount_hyjal();
@@ -297,10 +299,12 @@ void AddKalimdorScripts()
     AddSC_ashenvale();
     AddSC_azuremyst_isle();
     AddSC_bloodmyst_isle();
+    AddSC_darkshore();
     AddSC_desolace();
     AddSC_durotar();
     AddSC_durotar_cata();
     AddSC_dustwallow_marsh();
+    AddSC_teldrassil();
     AddSC_felwood();
     AddSC_moonglade();
     AddSC_mount_hyjal();
