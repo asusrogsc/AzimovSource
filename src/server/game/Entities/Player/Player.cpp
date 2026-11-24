@@ -153,6 +153,7 @@ uint64 const MAX_MONEY_AMOUNT = 9999999999ULL;
 void (*AzimovBeforeInventoryLoad)(Player* player) = nullptr;
 uint32 (*AzimovProfessionStep)(Player* player, uint16 skillId, uint32 step) = nullptr;
 int32 (*AzimovCurrencyGain)(Player* player, uint32 currencyId, int32 amount) = nullptr;
+uint32 (*AzimovMoneyGain)(Player const* player, uint32 amount) = nullptr;
 
 Player::Player(WorldSession* session) : Unit(true),
     _characterFlags(CHARACTER_FLAG_NONE), _characterFlags2(CHARACTER_FLAG_2_NONE)
@@ -14436,6 +14437,10 @@ int32 Player::GetQuestMoneyReward(Quest const* quest) const
 
     if (IsMaxLevel())
         moneyReward += quest->GetRewMoneyMaxLevel(this) * sWorld->getRate(RATE_MONEY_MAX_LEVEL_QUEST);
+
+    // Azimov : bonus d'or du Prestige (affiché aussi dans la fenêtre de quête)
+    if (moneyReward > 0 && AzimovMoneyGain)
+        moneyReward = int32(AzimovMoneyGain(this, uint32(moneyReward)));
 
     return moneyReward;
 }

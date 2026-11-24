@@ -250,8 +250,11 @@ void WorldSession::HandleLootMoneyOpcode(WorldPacket& /*recvData*/)
 
             uint32 goldPerPlayer = uint32((loot->gold) / (playersNear.size()));
 
+            uint32 const baseGoldPerPlayer = goldPerPlayer;
             for (std::vector<Player*>::const_iterator i = playersNear.begin(); i != playersNear.end(); ++i)
             {
+                // Azimov : bonus d'or du Prestige, propre à chaque membre du groupe
+                goldPerPlayer = AzimovMoneyGain ? AzimovMoneyGain(*i, baseGoldPerPlayer) : baseGoldPerPlayer;
                 (*i)->ModifyMoney(goldPerPlayer);
                 (*i)->UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_LOOT_MONEY, goldPerPlayer);
 
@@ -267,6 +270,9 @@ void WorldSession::HandleLootMoneyOpcode(WorldPacket& /*recvData*/)
         }
         else
         {
+            // Azimov : bonus d'or du Prestige
+            if (AzimovMoneyGain)
+                loot->gold = AzimovMoneyGain(player, loot->gold);
             player->ModifyMoney(loot->gold);
             player->UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_LOOT_MONEY, loot->gold);
 

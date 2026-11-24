@@ -1010,6 +1010,9 @@ TC_GAME_API extern uint32 (*AzimovCraftCount)(Player* player, SpellInfo const* s
 // Azimov : gain de monnaie (talents Azimov : bonus de Puissance Azimov), renvoie la quantité à donner.
 TC_GAME_API extern int32 (*AzimovCurrencyGain)(Player* player, uint32 currencyId, int32 amount);
 
+// Azimov : or gagné sur le butin et en récompense de quête (Prestige Azimov), renvoie la quantité à donner.
+TC_GAME_API extern uint32 (*AzimovMoneyGain)(Player const* player, uint32 amount);
+
 class TC_GAME_API Player : public Unit, public GridObject<Player>
 {
     friend class WorldSession;

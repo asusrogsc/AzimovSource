@@ -21,7 +21,14 @@
  *   serveur -> client : "S" début, "D:id~chemin~pos~coût~héroïque~choix~sort~icône~nom", "T:id~description",
  *                       "C" vider les talents possédés, "O:id,id,..." talents possédés, "F" fin (rafraîchir)
  *
- * Commandes MJ : .aztalent recharger | .aztalent liste | .aztalent raz   (joueur ciblé ou soi-même)
+ * Prestige Azimov (par personnage, table azcharacters.character_azimov_prestige) :
+ *   les 100 talents appris -> "AZTAL_P" : tous les talents sont retirés sans remboursement, niveau + 1.
+ *   Par niveau : +10 % de Puissance gagnée, +10 % d'or (butin et quêtes), +5 % de toutes les stats,
+ *   talents 20 % plus chers. Buff « Prestige Azimov » (1 charge par niveau), titre « %s N », haut fait « Prestige N ».
+ *   Chaque niveau débloque une paire d'ailes (1000200+) : "AZTAL_W:<sort>" (0 = aucune).
+ *   serveur -> client : "P:niveau:max:coût%:ailes:ailesDébloquées:puissance%:or%:stats%" (avant "F")
+ *
+ * Commandes MJ : .aztalent recharger | .aztalent liste | .aztalent raz | .aztalent prestige <niveau>
  */
 
 #include "ScriptMgr.h"
@@ -146,10 +153,63 @@ namespace
         return uint32(sConfigMgr->GetIntDefault("Azimov.Puissance.MonnaieId", 900));
     }
 
+    // ---------------------------------------------------------------- Prestige Azimov
+    struct AzPrestige { uint8 level = 0; uint32 wings = 0; };
+    std::unordered_map<ObjectGuid::LowType, AzPrestige> s_prestige;          // personnage -> prestige (protégé par s_lock)
+
+    // Ailes débloquées dans l'ordre : prestige 1 = la première, … ; au niveau maximum, toutes
+    uint32 const WINGS[] = { 1000200, 1000201, 1000202, 1000203, 1000204, 1000205, 1000206, 1000207, 1000208, 1000209, 1000210 };
+
+    int32 PCfg(char const* key, int32 def)
+    {
+        return sConfigMgr->GetIntDefault(key, def);
+    }
+
+    uint8 PrestigeMax()     { return uint8(std::max(1, std::min(PCfg("Azimov.Prestige.Max", 10), 50))); }
+    uint32 BuffSpell()      { return uint32(PCfg("Azimov.Prestige.SortBuff", 1000211)); }
+    int32 PowerPctPer()     { return PCfg("Azimov.Prestige.Puissance.Pct", 10); }
+    int32 GoldPctPer()      { return PCfg("Azimov.Prestige.Or.Pct", 10); }
+    int32 StatsPctPer()     { return PCfg("Azimov.Prestige.Stats.Pct", 5); }
+    int32 CostPctPer()      { return PCfg("Azimov.Prestige.Cout.Pct", 20); }
+
+    AzPrestige GetPrestige(ObjectGuid::LowType guid)
+    {
+        std::lock_guard<std::mutex> guard(s_lock);
+        auto itr = s_prestige.find(guid);
+        return itr != s_prestige.end() ? itr->second : AzPrestige();
+    }
+
+    uint8 PrestigeLevel(Player const* player)
+    {
+        return GetPrestige(player->GetGUID().GetCounter()).level;
+    }
+
+    // Coût en % du prix de base : 100 + 20 par niveau de prestige
+    uint32 CostPct(uint8 level)
+    {
+        return uint32(std::max(0, 100 + CostPctPer() * int32(level)));
+    }
+
+    uint32 UnlockedWings(uint8 level)
+    {
+        uint32 const all = uint32(std::size(WINGS));
+        return level >= PrestigeMax() ? all : std::min<uint32>(level, all);
+    }
+
+    bool IsWing(uint32 spellId)
+    {
+        return std::find(std::begin(WINGS), std::end(WINGS), spellId) != std::end(WINGS);
+    }
+
     AzTalent const* GetTalent(uint32 id)
     {
         auto itr = s_talents.find(id);
         return itr != s_talents.end() ? &itr->second : nullptr;
+    }
+
+    uint32 CostFor(AzTalent const* t, uint8 level)
+    {
+        return uint32(uint64(t->cost) * CostPct(level) / 100);
     }
 
     // Coupe une chaîne UTF-8 sans casser un caractère
@@ -261,6 +321,8 @@ namespace
                 allStatsPct += t->allStatsPct;
                 refiningPct += t->refiningPct;
             }
+        // Prestige : +5 % de toutes les stats par niveau
+        allStatsPct += float(StatsPctPer() * int32(PrestigeLevel(player)));
 
         // Raffinage d'expert : meilleur métier de récolte (herboristerie, minage, dépeçage) / 10
         if (flags & FLAG_EXPERT_REFINING)
@@ -418,7 +480,7 @@ namespace
     {
         if (!player || amount <= 0 || currencyId != CurrencyId())
             return amount;
-        float pct = 0.0f;
+        float pct = float(PowerPctPer() * int32(PrestigeLevel(player)));   // Prestige : +10 % par niveau
         for (uint32 id : GetOwned(player))
             if (AzTalent const* t = GetTalent(id))
                 pct += t->powerPct;
@@ -429,6 +491,17 @@ namespace
         if (roll_chance_f((bonus - float(whole)) * 100.0f))
             ++whole;
         return amount + whole;
+    }
+
+    // Crochet du cœur : or du butin et des récompenses de quête. Prestige : +10 % par niveau.
+    uint32 OnMoneyGain(Player const* player, uint32 amount)
+    {
+        if (!player || !amount)
+            return amount;
+        int32 pct = GoldPctPer() * int32(PrestigeLevel(player));
+        if (pct <= 0)
+            return amount;
+        return uint32(std::min<uint64>(uint64(amount) * uint64(100 + pct) / 100, 0xFFFFFFFFu));
     }
 
     // Crochet du cœur : dépeçage entièrement ramassé
@@ -629,6 +702,11 @@ namespace
         }
         if (line.size() > 2)
             Send(player, line);
+        AzPrestige p = GetPrestige(player->GetGUID().GetCounter());
+        char prestige[96];
+        snprintf(prestige, sizeof(prestige), "P:%u:%u:%u:%u:%u:%d:%d:%d", p.level, PrestigeMax(), CostPct(p.level), p.wings,
+            UnlockedWings(p.level), PowerPctPer() * int32(p.level), GoldPctPer() * int32(p.level), StatsPctPer() * int32(p.level));
+        Send(player, prestige);
         Send(player, "F");
     }
 
@@ -697,15 +775,16 @@ namespace
         }
 
         uint32 currency = CurrencyId();
-        if (t->cost && !player->HasCurrency(currency, t->cost))
+        uint32 const cost = CostFor(t, PrestigeLevel(player));   // +20 % par niveau de prestige
+        if (cost && !player->HasCurrency(currency, cost))
         {
             ChatHandler(player->GetSession()).PSendSysMessage("|cff00ccff[Talents Azimov]|r Il faut %u Puissance Azimov pour |cffffd700%s|r.",
-                t->cost, t->name.c_str());
+                cost, t->name.c_str());
             return;
         }
 
-        if (t->cost)
-            player->ModifyCurrency(currency, -int32(t->cost));
+        if (cost)
+            player->ModifyCurrency(currency, -int32(cost));
         {
             std::lock_guard<std::mutex> guard(s_lock);
             s_owned[guid].insert(id);
@@ -724,6 +803,7 @@ namespace
         std::set<uint32> owned = GetOwned(player);
         ObjectGuid::LowType guid = player->GetGUID().GetCounter();
         uint32 refund = 0, count = 0;
+        uint8 const level = PrestigeLevel(player);   // talents payés au prix du prestige actuel
 
         for (uint32 id : owned)
         {
@@ -733,7 +813,7 @@ namespace
 
             if (t)
             {
-                refund += t->cost;
+                refund += CostFor(t, level);
                 RemoveAuraOf(player, t);
             }
             {
@@ -756,9 +836,164 @@ namespace
         return count;
     }
 
+    // Buff « Prestige Azimov » (1 charge par niveau) et ailes choisies
+    void RefreshPrestigeAuras(Player* player)
+    {
+        if (!player || !player->IsInWorld())
+            return;
+        AzPrestige p = GetPrestige(player->GetGUID().GetCounter());
+
+        uint32 const buff = BuffSpell();
+        if (buff && sSpellMgr->GetSpellInfo(buff))
+        {
+            if (!p.level)
+                player->RemoveAurasDueToSpell(buff);
+            else
+            {
+                Aura* aura = player->GetAura(buff);
+                if (!aura)
+                    aura = player->AddAura(buff, player);
+                if (aura)
+                {
+                    if (aura->GetStackAmount() != p.level)
+                        aura->SetStackAmount(p.level);
+                    aura->SetMaxDuration(-1);
+                    aura->SetDuration(-1);
+                }
+            }
+        }
+
+        for (uint32 wing : WINGS)
+            if (wing != p.wings)
+                player->RemoveAurasDueToSpell(wing);
+        if (p.wings && sSpellMgr->GetSpellInfo(p.wings) && !player->HasAura(p.wings))
+            if (Aura* aura = player->AddAura(p.wings, player))
+            {
+                aura->SetMaxDuration(-1);
+                aura->SetDuration(-1);
+            }
+    }
+
+    void SavePrestige(ObjectGuid::LowType guid, AzPrestige const& p)
+    {
+        {
+            std::lock_guard<std::mutex> guard(s_lock);
+            s_prestige[guid] = p;
+        }
+        CharacterDatabase.PExecute("REPLACE INTO character_azimov_prestige (guid, level, wings) VALUES (%u, %u, %u)", guid, p.level, p.wings);
+    }
+
+    // Titre « %s N » (CharTitles.dbc) et haut fait « Prestige N » (Achievement.dbc) : désactivés tant que la config vaut 0
+    void GivePrestigeRewards(Player* player, uint8 level)
+    {
+        if (int32 firstAchievement = PCfg("Azimov.Prestige.HautFait.Debut", 0))
+            if (AchievementEntry const* achievement = sAchievementStore.LookupEntry(uint32(firstAchievement + level - 1)))
+                if (!player->HasAchieved(achievement->ID))
+                    player->CompletedAchievement(achievement);
+
+        if (int32 firstTitle = PCfg("Azimov.Prestige.Titre.Debut", 0))
+        {
+            for (uint8 i = 1; i < level; ++i)   // un seul titre de prestige : le plus haut
+                if (CharTitlesEntry const* old = sCharTitlesStore.LookupEntry(uint32(firstTitle + i - 1)))
+                    if (player->HasTitle(old))
+                        player->SetTitle(old, true);
+            if (CharTitlesEntry const* title = sCharTitlesStore.LookupEntry(uint32(firstTitle + level - 1)))
+            {
+                if (!player->HasTitle(title))
+                    player->SetTitle(title);
+                player->SetUInt32Value(PLAYER_CHOSEN_TITLE, title->Mask_ID);
+            }
+        }
+    }
+
+    // Les 100 talents (toutes les positions des deux chemins) sont-ils appris ?
+    bool AllTalentsOwned(std::set<uint32> const& owned)
+    {
+        std::set<std::pair<uint8, uint8>> need, have;
+        for (auto const& kv : s_talents)
+            need.insert({ kv.second.path, kv.second.position });
+        for (uint32 id : owned)
+            if (AzTalent const* t = GetTalent(id))
+                have.insert({ t->path, t->position });
+        return !need.empty() && std::includes(have.begin(), have.end(), need.begin(), need.end());
+    }
+
+    void Prestige(Player* player)
+    {
+        ObjectGuid::LowType guid = player->GetGUID().GetCounter();
+        AzPrestige p = GetPrestige(guid);
+        if (p.level >= PrestigeMax())
+        {
+            Notify(player, "Vous avez déjà atteint le prestige maximum.");
+            return;
+        }
+        std::set<uint32> owned = GetOwned(player);
+        if (!AllTalentsOwned(owned))
+        {
+            Notify(player, "Apprenez d'abord tous les talents des deux chemins.");
+            return;
+        }
+
+        // Tous les talents sont retirés, sans remboursement
+        for (uint32 id : owned)
+            RemoveAuraOf(player, GetTalent(id));
+        {
+            std::lock_guard<std::mutex> guard(s_lock);
+            s_owned[guid].clear();
+        }
+        CharacterDatabase.PExecute("DELETE FROM character_azimov_talent WHERE guid = %u", guid);
+
+        ++p.level;
+        if (!p.wings && UnlockedWings(p.level))
+            p.wings = WINGS[0];   // premières ailes portées d'office (modifiable dans l'onglet)
+        SavePrestige(guid, p);
+
+        ApplyStats(player);
+        ApplyFlags(player);
+        RefreshPrestigeAuras(player);
+        GivePrestigeRewards(player, p.level);
+
+        ChatHandler(player->GetSession()).PSendSysMessage("|cffffd700[Prestige Azimov]|r Vous passez |cffffd700Prestige %u|r ! "
+            "Bonus : +%d %% de Puissance, +%d %% d'or, +%d %% à toutes les stats. Les talents coûtent désormais %u %% de leur prix.",
+            p.level, PowerPctPer() * int32(p.level), GoldPctPer() * int32(p.level), StatsPctPer() * int32(p.level), CostPct(p.level));
+        SendOwned(player);
+    }
+
+    void SetWings(Player* player, uint32 spellId)
+    {
+        ObjectGuid::LowType guid = player->GetGUID().GetCounter();
+        AzPrestige p = GetPrestige(guid);
+        if (spellId)
+        {
+            uint32 const unlocked = UnlockedWings(p.level);
+            auto itr = std::find(std::begin(WINGS), std::end(WINGS), spellId);
+            if (itr == std::end(WINGS) || uint32(itr - std::begin(WINGS)) >= unlocked)
+            {
+                Notify(player, "Ces ailes ne sont pas encore débloquées.");
+                return;
+            }
+        }
+        p.wings = spellId;
+        SavePrestige(guid, p);
+        RefreshPrestigeAuras(player);
+        SendOwned(player);
+    }
+
     void LoadPlayer(Player* player)
     {
         ObjectGuid::LowType guid = player->GetGUID().GetCounter();
+        {
+            AzPrestige p;
+            if (QueryResult result = CharacterDatabase.PQuery("SELECT level, wings FROM character_azimov_prestige WHERE guid = %u", guid))
+            {
+                p.level = result->Fetch()[0].GetUInt8();
+                p.wings = result->Fetch()[1].GetUInt32();
+                if (p.wings && !IsWing(p.wings))
+                    p.wings = 0;
+            }
+            std::lock_guard<std::mutex> guard(s_lock);
+            s_prestige[guid] = p;
+        }
         std::set<uint32> owned;
         if (QueryResult result = CharacterDatabase.PQuery("SELECT talent_id FROM character_azimov_talent WHERE guid = %u", guid))
         {
@@ -774,6 +1009,17 @@ namespace
             ApplyAura(player, GetTalent(id));
         ApplyStats(player);
         ApplyFlags(player);
+        RefreshPrestigeAuras(player);
+    }
+
+    // Buff de prestige et ailes : gardés à la mort
+    void MarkPrestigeAuras()
+    {
+        std::vector<uint32> spells(std::begin(WINGS), std::end(WINGS));
+        spells.push_back(BuffSpell());
+        for (uint32 id : spells)
+            if (SpellInfo const* info = sSpellMgr->GetSpellInfo(id))
+                const_cast<SpellInfo*>(info)->AttributesEx3 |= SPELL_ATTR3_ALLOW_AURA_WHILE_DEAD;
     }
 }
 
@@ -785,6 +1031,7 @@ public:
     void OnStartup() override
     {
         LoadTalents();
+        MarkPrestigeAuras();
     }
 };
 
@@ -807,6 +1054,17 @@ public:
         s_leechPct.erase(player->GetGUID().GetCounter());
         s_lightProc.erase(player->GetGUID().GetCounter());
         s_lightNext.erase(player->GetGUID().GetCounter());
+        s_prestige.erase(player->GetGUID().GetCounter());
+    }
+
+    void OnMapChanged(Player* player) override
+    {
+        RefreshPrestigeAuras(player);
+    }
+
+    void OnUpdateZone(Player* player, uint32 /*newZone*/, uint32 /*newArea*/) override
+    {
+        RefreshPrestigeAuras(player);
     }
 
     void OnChat(Player* player, uint32 /*type*/, uint32 lang, std::string& msg, Player* receiver) override
@@ -820,6 +1078,10 @@ public:
             Buy(player, uint32(strtoul(msg.c_str() + 8, nullptr, 10)));
         else if (msg.compare(0, 8, "AZTAL_R:") == 0)
             Reset(player, uint8(strtoul(msg.c_str() + 8, nullptr, 10)));
+        else if (msg == "AZTAL_P")
+            Prestige(player);
+        else if (msg.compare(0, 8, "AZTAL_W:") == 0)
+            SetWings(player, uint32(strtoul(msg.c_str() + 8, nullptr, 10)));
         else if (msg.compare(0, 8, "AZTAL_E:") == 0)
         {
             char* end = nullptr;
@@ -842,6 +1104,7 @@ public:
             { "recharger", rbac::RBAC_PERM_COMMAND_RELOAD, false, &HandleReload, "" },
             { "liste",     rbac::RBAC_PERM_COMMAND_GPS,    false, &HandleList,   "" },
             { "raz",       rbac::RBAC_PERM_COMMAND_RELOAD, false, &HandleReset,  "" },
+            { "prestige",  rbac::RBAC_PERM_COMMAND_RELOAD, false, &HandlePrestige, "" },
         };
         static std::vector<ChatCommand> commandTable =
         {
@@ -878,6 +1141,27 @@ public:
         if (!target)
             return false;
         handler->PSendSysMessage("%s : %u talent(s) réinitialisé(s).", target->GetName().c_str(), Reset(target, 0));
+        return true;
+    }
+
+    // .aztalent prestige <niveau> : fixe le niveau de prestige (tests), sans toucher aux talents
+    static bool HandlePrestige(ChatHandler* handler, char const* args)
+    {
+        Player* target = handler->getSelectedPlayerOrSelf();
+        if (!target || !args || !*args)
+            return false;
+        uint8 level = uint8(std::min<unsigned long>(strtoul(args, nullptr, 10), PrestigeMax()));
+        AzPrestige p = GetPrestige(target->GetGUID().GetCounter());
+        p.level = level;
+        if (p.wings && (std::find(std::begin(WINGS), std::end(WINGS), p.wings) - std::begin(WINGS)) >= int32(UnlockedWings(level)))
+            p.wings = 0;
+        SavePrestige(target->GetGUID().GetCounter(), p);
+        ApplyStats(target);
+        RefreshPrestigeAuras(target);
+        if (level)
+            GivePrestigeRewards(target, level);
+        SendOwned(target);
+        handler->PSendSysMessage("%s : prestige %u.", target->GetName().c_str(), level);
         return true;
     }
 };
@@ -1044,6 +1328,7 @@ void AddSC_azimov_talents()
     AzimovProfessionStep = &OnProfessionStep;
     AzimovCraftCount = &OnCraftCount;
     AzimovCurrencyGain = &OnCurrencyGain;
+    AzimovMoneyGain = &OnMoneyGain;
     new azimov_talents_world();
     new azimov_talents_player();
     new azimov_talents_command();
