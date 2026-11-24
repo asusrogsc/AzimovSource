@@ -1,4 +1,5 @@
 #include "ScriptMgr.h"
+#include "WorldSession.h"
 #include "Chat.h"
 #include "Player.h"
 

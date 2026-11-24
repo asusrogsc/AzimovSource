@@ -21,12 +21,14 @@
 #include "Player.h"
 #include "WorldSession.h"
 #include <string>
+#include <mutex>
 #include <unordered_map>
 
 namespace
 {
     // nombre de hauts faits déjà envoyés au compte, par personnage (évite de tout réécrire à chaque sauvegarde)
     std::unordered_map<ObjectGuid::LowType, size_t> SyncedCount;
+    std::mutex SyncedLock;   // OnSave peut venir de plusieurs fils de cartes (MapUpdate.Threads > 1)
 
     bool IsShareable(AchievementEntry const* achievement)
     {
@@ -53,13 +55,16 @@ namespace
 
         CompletedAchievementMap const& completed = mgr->GetCompletedAchievements();
         ObjectGuid::LowType guid = player->GetGUID().GetCounter();
-        if (!force)
         {
-            auto itr = SyncedCount.find(guid);
-            if (itr != SyncedCount.end() && itr->second == completed.size())
-                return;
+            std::lock_guard<std::mutex> lock(SyncedLock);
+            if (!force)
+            {
+                auto itr = SyncedCount.find(guid);
+                if (itr != SyncedCount.end() && itr->second == completed.size())
+                    return;
+            }
+            SyncedCount[guid] = completed.size();
         }
-        SyncedCount[guid] = completed.size();
 
         uint32 accountId = player->GetSession()->GetAccountId();
         std::string values;
@@ -148,6 +153,7 @@ public:
             return;
         if (player->GetSession())
             SaveToAccount(player, false);
+        std::lock_guard<std::mutex> lock(SyncedLock);
         SyncedCount.erase(player->GetGUID().GetCounter());
     }
 };

@@ -207,9 +207,13 @@ namespace
 
             uint32 moved = std::min(target->GetMaxStackCount() - target->GetCount(), item->GetCount());
             target->SetCount(target->GetCount() + moved);
-            CharacterDatabase.PExecute("UPDATE item_instance SET count = %u WHERE guid = %u", target->GetCount(), target->GetGUID().GetCounter());
             uint32 destroy = moved;
             player->DestroyItemCount(item, destroy, true);
+            // pile de la banque et sacs du joueur enregistrés ensemble (sinon un arrêt du serveur entre les deux dupliquait les objets)
+            CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+            trans->PAppend("UPDATE item_instance SET count = %u WHERE guid = %u", target->GetCount(), target->GetGUID().GetCounter());
+            player->SaveInventoryAndGoldToDB(trans);
+            CharacterDatabase.CommitTransaction(trans);
         }
         else
         {

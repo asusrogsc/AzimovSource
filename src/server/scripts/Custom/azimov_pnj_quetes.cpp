@@ -19,6 +19,7 @@
  */
 
 #include "ScriptMgr.h"
+#include "Log.h"
 #include "Chat.h"
 #include "CellImpl.h"
 #include "Creature.h"
