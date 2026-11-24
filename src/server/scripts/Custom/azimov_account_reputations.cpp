@@ -8,7 +8,8 @@
  * - Table characters `account_reputations (account, faction, standing)` : meilleure valeur
  *   totale (base comprise) atteinte sur le compte, faction par faction.
  * - OnLogin / OnSave / OnLogout : les réputations du personnage remontent au compte.
- * - OnLogin : chaque faction du compte plus haute que celle du personnage est relevée.
+ * - OnLogin : chaque faction du compte plus haute que celle du personnage est relevée, sans débordement
+ *   sur les factions sœurs (correctif du 24/11).
  * - Exclus : réputation de guilde (1168), factions sans réputation, et toute faction dont la
  *   réputation de base pour ce personnage est inférieure à Neutre (= factions de l'autre camp :
  *   Hurlevent pour un Horde, Mag'har pour un Alliance, etc.).
@@ -91,8 +92,15 @@ namespace
             if (!IsShareableFor(player, faction))
                 continue;
 
-            if (standing > mgr.GetReputation(faction) && mgr.SetReputation(faction, standing))
+            // SetOneFactionReputation et non SetReputation : SetReputation(non incrémental) répand la valeur
+            // ABSOLUE x taux sur les factions sœurs (Hurlevent -> Forgefer, Darnassus… à 50 %), ce qui les
+            // faisait redescendre à chaque connexion (puis remonter, d'où le message à chaque fois).
+            if (standing > mgr.GetReputation(faction) && mgr.SetOneFactionReputation(faction, standing, false))
+            {
+                if (FactionState const* state = mgr.GetState(faction))
+                    mgr.SendState(state);
                 ++raised;
+            }
         } while (result->NextRow());
 
         return raised;
