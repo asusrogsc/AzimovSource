@@ -175,6 +175,14 @@ namespace
         Send(player, "F");
     }
 
+    // Faction des sujets : celle de la capitale du camp du joueur (Hurlevent 11 / Orgrimmar 85), comme un garde ou
+    // un PNJ d'escorte. Avec la faction du joueur lui-même (gabarit « joueur »), le client refusait de les aider :
+    // soins et buffs partaient sur le joueur au lieu du sujet ciblé.
+    uint32 SujetFaction(Player* player)
+    {
+        return player->GetTeam() == ALLIANCE ? 11 : 85;
+    }
+
     // Place les sujets manquants (ou morts) autour du joueur. Le joueur doit être dans le donjon du groupe.
     // Niveau du joueur + statistiques de ce niveau + points de vie par rôle (Azimov.Sujets.<Role>.Vie)
     void ApplySujetLevel(Creature* sujet, uint8 level)
@@ -227,7 +235,7 @@ namespace
             // pour que le journal de combat marque le sujet comme « à moi » et que Skada / Recount compte ses dégâts et soins.
             if (sConfigMgr->GetBoolDefault("Azimov.Sujets.Skada", false))
                 sujet->SetCreatorGUID(player->GetGUID());
-            sujet->SetFaction(player->GetFaction());
+            sujet->SetFaction(SujetFaction(player));
             // Les modèles copiés (PNJ de ville) ont souvent IMMUNE_TO_PC / IMMUNE_TO_NPC dans unit_flags :
             // le joueur ne pouvait ni soigner ni améliorer ses sujets (IsValidAssistTarget refuse une cible immunisée aux joueurs)
             sujet->SetImmuneToPC(false);
@@ -574,6 +582,20 @@ struct npc_azimov_sujet : public ScriptedAI
         return true;
     }
 
+    // Coup fatal porté par un sujet : le cœur n'appelle OnCreatureKill que si le tueur est un joueur.
+    // On le fait pour le joueur (Puissance Azimov, butin universel… comme s'il l'avait tué lui-même).
+    void KilledUnit(Unit* victim) override
+    {
+        Creature* killed = victim ? victim->ToCreature() : nullptr;
+        Player* owner = Owner();
+        if (!killed || !owner || !owner->IsInMap(me))
+            return;
+        if (Player* recipient = killed->GetLootRecipient())
+            if (recipient != owner)
+                return;   // monstre attribué à quelqu'un d'autre
+        sScriptMgr->OnCreatureKill(owner, killed);
+    }
+
     void JustDied(Unit* /*killer*/) override
     {
         if (Player* owner = Owner())
@@ -634,8 +656,8 @@ struct npc_azimov_sujet : public ScriptedAI
         if (me->IsCharmed())
             me->RemoveCharmAuras();
         // Après un charme, le cœur remet la faction du gabarit : on reprend celle du joueur
-        if (!me->IsCharmed() && me->GetFaction() != owner->GetFaction())
-            me->SetFaction(owner->GetFaction());
+        if (!me->IsCharmed() && me->GetFaction() != SujetFaction(owner))
+            me->SetFaction(SujetFaction(owner));
         if (me->IsImmuneToPC())
             me->SetImmuneToPC(false);
 
