@@ -35,6 +35,10 @@ namespace
         if (!achievement)
             return false;
 
+        // Prestige Azimov : propre à chaque personnage (catégorie 15102 « Azimov »)
+        if (achievement->Category == 15102)
+            return false;
+
         return !(achievement->Flags & (ACHIEVEMENT_FLAG_COUNTER | ACHIEVEMENT_FLAG_REALM_FIRST_REACH |
             ACHIEVEMENT_FLAG_REALM_FIRST_KILL | ACHIEVEMENT_FLAG_REALM_FIRST_GUILD | ACHIEVEMENT_FLAG_GUILD));
     }
