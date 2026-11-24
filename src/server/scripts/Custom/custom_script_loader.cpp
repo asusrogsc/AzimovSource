@@ -55,6 +55,7 @@ void AddSC_azimov_quetes_penombre();
 void AddSC_azimov_glyphe_titan();
 void AddSC_azimov_talents();
 void AddSC_azimov_sujets();
+void AddSC_azimov_zone_repos();
 
 void AddCustomScripts()
 {
@@ -93,4 +94,5 @@ void AddCustomScripts()
 	AddSC_azimov_glyphe_titan();
 	AddSC_azimov_talents();
 	AddSC_azimov_sujets();
+	AddSC_azimov_zone_repos();
 }

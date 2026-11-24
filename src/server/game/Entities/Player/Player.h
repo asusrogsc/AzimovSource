@@ -733,7 +733,8 @@ enum RestFlag
 {
     REST_FLAG_IN_TAVERN         = 0x1,
     REST_FLAG_IN_CITY           = 0x2,
-    REST_FLAG_IN_FACTION_AREA   = 0x4
+    REST_FLAG_IN_FACTION_AREA   = 0x4,
+    REST_FLAG_AZIMOV            = 0x8    // Azimov : zones de repos posées en jeu (PNJ 990030)
 };
 
 enum TeleportToOptions
