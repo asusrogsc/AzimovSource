@@ -271,16 +271,27 @@ namespace
             return;
         }
 
+        std::vector<ObjectGuid> anciens;
         {
             std::lock_guard<std::mutex> guard(s_lock);
             AzSujetGroup& g = s_groups[player->GetGUID().GetCounter()];
+            // Même donjon, même rôle, déjà dedans : on garde les sujets en place (EnsureFollowers ne fait venir que
+            // les absents). Avant, la liste était vidée à chaque clic -> un nouveau groupe par clic, les anciens restaient.
+            bool memeGroupe = g.map == d->map && g.role == role && !g.entries.empty() && player->GetMapId() == d->map;
+            if (!memeGroupe)
+            {
+                anciens = g.guids;
+                g.guids.clear();
+            }
             g.dungeon = d->id;
             g.map = d->map;
             g.role = role;
             g.entries = EntriesFor(role);
-            g.guids.clear();
             g.pending = player->GetMapId() != d->map;
         }
+        for (ObjectGuid const& guid : anciens)
+            if (Creature* c = ObjectAccessor::GetCreature(*player, guid))
+                c->DespawnOrUnsummon();
 
         if (player->GetMapId() == d->map)
         {
@@ -327,6 +338,17 @@ struct npc_azimov_sujet : public ScriptedAI
     {
         TempSummon const* summon = me->ToTempSummon();
         return summon ? ObjectAccessor::GetPlayer(*me, summon->GetSummonerGUID()) : nullptr;
+    }
+
+    // Ce sujet fait-il partie du groupe actuel du joueur ? (sinon c'est un doublon ou un reste d'un ancien groupe)
+    bool InGroup(Player* owner) const
+    {
+        std::lock_guard<std::mutex> guard(s_lock);
+        auto itr = s_groups.find(owner->GetGUID().GetCounter());
+        if (itr == s_groups.end())
+            return false;
+        std::vector<ObjectGuid> const& guids = itr->second.guids;
+        return std::find(guids.begin(), guids.end(), me->GetGUID()) != guids.end();
     }
 
     bool IsTank() const { return me->GetEntry() == NPC_SUJET_TANK; }
@@ -466,7 +488,7 @@ struct npc_azimov_sujet : public ScriptedAI
         {
             float dz = std::fabs(me->GetPositionZ() - owner->GetPositionZ());
             float dist = me->GetDistance(owner);
-            tooFar = dist > 60.0f || (dz > 15.0f && me->GetDistance2d(owner) < 25.0f) || !me->IsPositionValid();
+            tooFar = dist > 60.0f || (dz > 15.0f && me->GetDistance2d(owner) < 25.0f && !owner->IsFalling());
         }
         _farTime = tooFar ? _farTime + 500 : 0;
         bool fight = me->IsInCombat() || owner->IsInCombat();
@@ -474,9 +496,18 @@ struct npc_azimov_sujet : public ScriptedAI
             return false;
 
         _farTime = 0;
-        Position pos = owner->GetPosition();
-        owner->MovePositionToFirstCollision(pos, 2.5f, AngleFor(me->GetEntry()));
-        me->NearTeleportTo(pos.GetPositionX(), pos.GetPositionY(), pos.GetPositionZ(), owner->GetOrientation());
+        // À la hauteur exacte du joueur : MovePositionToFirstCollision recalculait le sol et, dans les donjons
+        // à étages (Monastère écarlate…), posait le sujet à l'étage du dessous -> encore « trop loin » ->
+        // nouvelle téléportation toutes les 3 s (sujets qui clignotent)
+        float angle = owner->GetOrientation() + AngleFor(me->GetEntry());
+        float x = owner->GetPositionX() + 1.5f * std::cos(angle);
+        float y = owner->GetPositionY() + 1.5f * std::sin(angle);
+        if (!owner->IsWithinLOS(x, y, owner->GetPositionZ() + 1.0f))
+        {
+            x = owner->GetPositionX();
+            y = owner->GetPositionY();
+        }
+        me->NearTeleportTo(x, y, owner->GetPositionZ() + 0.5f, owner->GetOrientation());
         me->GetMotionMaster()->Clear();
         return true;
     }
@@ -573,9 +604,9 @@ struct npc_azimov_sujet : public ScriptedAI
     void UpdateAI(uint32 diff) override
     {
         Player* owner = Owner();
-        if (!owner)
+        if (!owner || !InGroup(owner))
         {
-            me->DespawnOrUnsummon();
+            me->DespawnOrUnsummon();   // plus de joueur, ou sujet en trop (plus dans la liste du groupe)
             return;
         }
 
