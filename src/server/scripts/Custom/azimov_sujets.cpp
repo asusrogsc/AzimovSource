@@ -72,7 +72,11 @@ namespace
     enum AzSujetSpell : uint32
     {
         SPELL_HEAL      = 2061,   // Soins rapides (montant imposé)
-        SPELL_FROSTBOLT = 116,    // Éclair de givre (dégâts imposés)
+        SPELL_FIREBALL  = 133,    // Boule de feu (dégâts imposés, effet 0). Avant : Éclair de givre 116, dont les dégâts
+                                  // sont l'effet 1 -> la valeur imposée remplaçait le ralentissement et les dégâts restaient ~100
+        SPELL_THUNDER_CLAP = 6343,  // Coup de tonnerre (tank, zone 8 m, dégâts = effet 0)
+        SPELL_SHIELD_SLAM  = 23922, // Heurt de bouclier (tank, dégâts = effet 1)
+        SPELL_HEROIC_STRIKE = 78,   // Frappe héroïque (Kael, dégâts = effet 0)
         SPELL_LIGHTNING = 403,    // Éclair (dégâts imposés)
         SPELL_SMITE     = 585,    // Châtiment (dégâts imposés)
         SPELL_DRINK     = 430,    // Boisson (visuel : le sujet s'assoit et boit)
@@ -224,6 +228,10 @@ namespace
             if (sConfigMgr->GetBoolDefault("Azimov.Sujets.Skada", false))
                 sujet->SetCreatorGUID(player->GetGUID());
             sujet->SetFaction(player->GetFaction());
+            // Les modèles copiés (PNJ de ville) ont souvent IMMUNE_TO_PC / IMMUNE_TO_NPC dans unit_flags :
+            // le joueur ne pouvait ni soigner ni améliorer ses sujets (IsValidAssistTarget refuse une cible immunisée aux joueurs)
+            sujet->SetImmuneToPC(false);
+            sujet->SetImmuneToNPC(false);
             ApplySujetLevel(sujet, player->getLevel());
             sujet->SetFullHealth();
             sujet->SetPower(POWER_MANA, sujet->GetMaxPower(POWER_MANA));
@@ -597,6 +605,8 @@ struct npc_azimov_sujet : public ScriptedAI
         // Après un charme, le cœur remet la faction du gabarit : on reprend celle du joueur
         if (!me->IsCharmed() && me->GetFaction() != owner->GetFaction())
             me->SetFaction(owner->GetFaction());
+        if (me->IsImmuneToPC())
+            me->SetImmuneToPC(false);
 
         if (owner->IsAlive() && RejoinIfStuck(owner))
             return;
@@ -674,16 +684,50 @@ struct npc_azimov_sujet : public ScriptedAI
 
         if (IsCaster() && me->IsWithinDistInMap(enemy, 30.0f))
         {
-            uint32 spell = me->GetEntry() == NPC_SUJET_CASTER ? SPELL_FROSTBOLT : SPELL_LIGHTNING;
+            uint32 spell = me->GetEntry() == NPC_SUJET_CASTER ? SPELL_FIREBALL : SPELL_LIGHTNING;
             me->CastSpell(enemy, spell, CastSpellExtraArgs().AddSpellBP0(ScaledAmount(me, 2.5f, "Azimov.Sujets.Degats")));
         }
         else if (!IsCaster())
+        {
+            UseMeleeAbilities(enemy);
             DoMeleeAttackIfReady();
+        }
+    }
+
+    // Techniques de mêlée (sinon que des coups blancs) : tank = Coup de tonnerre / 8 s + Heurt de bouclier / 6 s,
+    // Kael = Frappe héroïque / 4 s. Dégâts imposés comme pour les sorts (Azimov.Sujets.Degats).
+    void UseMeleeAbilities(Unit* enemy)
+    {
+        _ability1 = _ability1 > 500 ? _ability1 - 500 : 0;
+        _ability2 = _ability2 > 500 ? _ability2 - 500 : 0;
+        if (!me->IsWithinMeleeRange(enemy))
+            return;
+
+        if (IsTank())
+        {
+            if (!_ability1)
+            {
+                me->CastSpell(me, SPELL_THUNDER_CLAP, CastSpellExtraArgs(true).AddSpellBP0(ScaledAmount(me, 0.8f, "Azimov.Sujets.Degats")));
+                _ability1 = 8000;
+            }
+            else if (!_ability2)
+            {
+                me->CastSpell(enemy, SPELL_SHIELD_SLAM, CastSpellExtraArgs(true).AddSpellMod(SPELLVALUE_BASE_POINT1, ScaledAmount(me, 1.5f, "Azimov.Sujets.Degats")));
+                _ability2 = 6000;
+            }
+        }
+        else if (me->GetEntry() == NPC_SUJET_MELEE && !_ability1)
+        {
+            me->CastSpell(enemy, SPELL_HEROIC_STRIKE, CastSpellExtraArgs(true).AddSpellBP0(ScaledAmount(me, 1.5f, "Azimov.Sujets.Degats")));
+            _ability1 = 4000;
+        }
     }
 
 private:
     uint32 _thinkTimer;
     uint32 _summonTimer;
+    uint32 _ability1 = 0;  // délai des techniques de mêlée (ms)
+    uint32 _ability2 = 3000;
     uint32 _farTime = 0;   // depuis combien de temps (ms) le sujet est trop loin du joueur
     bool _drinking;
     uint32 _statusTimer;
