@@ -39,6 +39,8 @@
 #include "ObjectAccessor.h"
 #include "Player.h"
 #include "ScriptedCreature.h"
+#include "Spell.h"
+#include "SpellInfo.h"
 #include "SpellDefines.h"
 #include "TemporarySummon.h"
 #include "ThreatManager.h"
@@ -827,6 +829,37 @@ public:
         }
         if (summon)
             EnsureFollowers(player);
+    }
+
+    // Soins / buffs du joueur sur un sujet : le client 4.3.4 refuse d'« aider » un PNJ qui n'est pas dans son
+    // groupe et lance le sort sur le joueur lui-même. Si le joueur a un de ses sujets en cible et que le sort
+    // bénéfique allait sur lui, on le redirige sur le sujet (portée et ligne de vue vérifiées).
+    void OnSpellCast(Player* player, Spell* spell, bool /*skipCheck*/) override
+    {
+        SpellInfo const* info = spell->GetSpellInfo();
+        if (!info || !info->IsPositive() || spell->m_targets.GetUnitTarget() != player)
+            return;
+        if (!(info->GetExplicitTargetMask() & (TARGET_FLAG_UNIT_ALLY | TARGET_FLAG_UNIT | TARGET_FLAG_UNIT_RAID | TARGET_FLAG_UNIT_PARTY)))
+            return;
+
+        ObjectGuid selection = player->GetTarget();
+        if (selection.IsEmpty() || selection == player->GetGUID() || !selection.IsCreature())
+            return;
+        {
+            std::lock_guard<std::mutex> guard(s_lock);
+            auto itr = s_groups.find(player->GetGUID().GetCounter());
+            if (itr == s_groups.end())
+                return;
+            if (std::find(itr->second.guids.begin(), itr->second.guids.end(), selection) == itr->second.guids.end())
+                return;
+        }
+        Creature* sujet = ObjectAccessor::GetCreature(*player, selection);
+        if (!sujet || !sujet->IsAlive())
+            return;
+        float range = info->GetMaxRange(true, player, spell);
+        if (!player->IsWithinDistInMap(sujet, std::max(range, 5.0f)) || !player->IsWithinLOSInMap(sujet))
+            return;
+        spell->m_targets.SetUnitTarget(sujet);
     }
 
     void OnLogout(Player* player) override
