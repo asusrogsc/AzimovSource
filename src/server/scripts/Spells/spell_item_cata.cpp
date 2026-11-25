@@ -82,7 +82,7 @@ class spell_item_blessing_of_faith : public SpellScript
         if (Unit* unitTarget = GetHitUnit())
         {
             uint32 spellId = 0;
-            switch (unitTarget->GetClass())
+            switch (unitTarget->getClass())
             {
                 case CLASS_DRUID:
                     spellId = SPELL_BLESSING_OF_LOWER_CITY_DRUID;
@@ -366,15 +366,22 @@ class spell_item_dire_brew : public AuraScript
 
         uint32 model = 0;
         uint8 gender = target->getGender();
-        ChrClassesEntry const* chrClass = sChrClassesStore.AssertEntry(target->GetClass());
-        if (chrClass->ArmorTypeMask & (1 << ITEM_SUBCLASS_ARMOR_PLATE))
-            model = gender == GENDER_MALE ? MODEL_CLASS_PLATE_MALE : MODEL_CLASS_PLATE_FEMALE;
-        else if (chrClass->ArmorTypeMask & (1 << ITEM_SUBCLASS_ARMOR_MAIL))
-            model = gender == GENDER_MALE ? MODEL_CLASS_MAIL_MALE : MODEL_CLASS_MAIL_FEMALE;
-        else if (chrClass->ArmorTypeMask & (1 << ITEM_SUBCLASS_ARMOR_LEATHER))
-            model = gender == GENDER_MALE ? MODEL_CLASS_LEATHER_MALE : MODEL_CLASS_LEATHER_FEMALE;
-        else if (chrClass->ArmorTypeMask & (1 << ITEM_SUBCLASS_ARMOR_CLOTH))
-            model = gender == GENDER_MALE ? MODEL_CLASS_CLOTH_MALE : MODEL_CLASS_CLOTH_FEMALE;
+        // 4.3.4 : pas de ArmorTypeMask dans ChrClasses.dbc, armure de la classe au niveau maximum
+        switch (target->getClass())
+        {
+            case CLASS_WARRIOR: case CLASS_PALADIN: case CLASS_DEATH_KNIGHT:
+                model = gender == GENDER_MALE ? MODEL_CLASS_PLATE_MALE : MODEL_CLASS_PLATE_FEMALE;
+                break;
+            case CLASS_HUNTER: case CLASS_SHAMAN:
+                model = gender == GENDER_MALE ? MODEL_CLASS_MAIL_MALE : MODEL_CLASS_MAIL_FEMALE;
+                break;
+            case CLASS_ROGUE: case CLASS_DRUID:
+                model = gender == GENDER_MALE ? MODEL_CLASS_LEATHER_MALE : MODEL_CLASS_LEATHER_FEMALE;
+                break;
+            default:
+                model = gender == GENDER_MALE ? MODEL_CLASS_CLOTH_MALE : MODEL_CLASS_CLOTH_FEMALE;
+                break;
+        }
 
         if (model)
             target->SetDisplayId(model);

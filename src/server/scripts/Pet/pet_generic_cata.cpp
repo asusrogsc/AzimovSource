@@ -114,9 +114,9 @@ class spell_pet_gen_lich_pet_aura : public AuraScript
 
         Unit* owner = GetUnitOwner();
 
-        std::list<TempSummon*> minionList;
+        std::list<Creature*> minionList;
         owner->GetAllMinionsByEntry(minionList, NPC_LICH_PET);
-        for (TempSummon* minion : minionList)
+        for (Creature* minion : minionList)
             owner->CastSpell(minion, SPELL_LICH_PET_AURA_ONKILL, true);
     }
 

@@ -133,17 +133,17 @@ enum RedridgeHugeBoulder
     POINT_UP_PATH               = 3,
 };
 
-constexpr Position TrentRepositionPos = { -9281.44f, -2285.27f, 67.5123f, 6.0213f };
+Position const TrentRepositionPos = { -9281.44f, -2285.27f, 67.5123f, 6.0213f };
 
-constexpr Position DmitriRepositionPos = { -9282.8f, -2293.28f, 67.5089f, 6.2657f };
+Position const DmitriRepositionPos = { -9282.8f, -2293.28f, 67.5089f, 6.2657f };
 
-constexpr Position JessRepositionPos = { -9282.27f, -2290.95f, 67.5319f, 6.0737f };
+Position const JessRepositionPos = { -9282.27f, -2290.95f, 67.5319f, 6.0737f };
 
-constexpr Position DanielRepositionPos = { -9281.77f, -2287.55f, 67.5869f, 6.0911f };
+Position const DanielRepositionPos = { -9281.77f, -2287.55f, 67.5869f, 6.0911f };
 
-constexpr Position MatthewRepositionPos = { -9280.71f, -2283.21f, 67.5747f, 6.0737f };
+Position const MatthewRepositionPos = { -9280.71f, -2283.21f, 67.5747f, 6.0737f };
 
-constexpr Position AlexRepositionPos = { -9279.86f, -2281.42f, 67.5854f, 5.7421f };
+Position const AlexRepositionPos = { -9279.86f, -2281.42f, 67.5854f, 5.7421f };
 
 struct npc_redridge_huge_boulder : public CreatureAI
 {
@@ -424,7 +424,7 @@ private:
     ObjectGuid _matthewGUID;
 };
 
-constexpr Position EttinNearBoulderPosition = { -9272.053f, -2291.7463f, 68.54081f };
+Position const EttinNearBoulderPosition = { -9272.053f, -2291.7463f, 68.54081f };
 
 struct npc_redridge_subdued_canyon_ettin : public CreatureAI
 {
@@ -542,10 +542,14 @@ class spell_redridge_control_ettin : public SpellScript
     SpellCastResult CheckCast()
     {
         // check for a spawn spell with a valid caster (subdued ettin)
-        Aura const* spawnAura = GetCaster()->GetAura(SPELL_CANYON_ETTIN_SPAWN_SPELL, [](Aura const* aura)
-        {
-            return aura->GetCaster() != nullptr;
-        });
+        Aura const* spawnAura = nullptr;
+        Unit::AuraApplicationMapBounds bounds = GetCaster()->GetAppliedAuras().equal_range(SPELL_CANYON_ETTIN_SPAWN_SPELL);
+        for (auto itr = bounds.first; itr != bounds.second; ++itr)
+            if (itr->second->GetBase()->GetCaster())
+            {
+                spawnAura = itr->second->GetBase();
+                break;
+            }
 
         if (spawnAura != nullptr)
         {
@@ -563,7 +567,7 @@ class spell_redridge_control_ettin : public SpellScript
         return SPELL_CAST_OK;
     }
 
-    void HandleScriptEffect(SpellEffIndex /*effIndex*/) const
+    void HandleScriptEffect(SpellEffIndex /*effIndex*/)
     {
         if (Unit const* target = GetHitUnit())
         {
@@ -587,16 +591,16 @@ class spell_redridge_control_ettin : public SpellScript
 
 class spell_redridge_control_ettin_2 : public SpellScript
 {
-    void HandleScriptEffect(SpellEffIndex /*effIndex*/) const
+    void HandleScriptEffect(SpellEffIndex /*effIndex*/)
     {
         if (Creature* target = GetHitCreature())
             target->DespawnOrUnsummon();
 
         // subdued ettin minion casts 82558 to player
-        std::list<TempSummon*> minionList;
+        std::list<Creature*> minionList;
         GetCaster()->GetAllMinionsByEntry(minionList, NPC_SUBDUED_CANYON_ETTIN);
-        if (TempSummon* ettin = minionList.front())
-            ettin->CastSpell(GetCaster(), SPELL_CANYON_ETTIN_SPAWN_SPELL, false);
+        if (!minionList.empty())
+            minionList.front()->CastSpell(GetCaster(), SPELL_CANYON_ETTIN_SPAWN_SPELL, false);
     }
 
     void Register() override

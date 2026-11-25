@@ -42,7 +42,18 @@ public:
             if (!apply)
                 return;
 
-            me->GetMotionMaster()->MovePath(EagleSpiritflightPath, false);
+            // chemin de vol de cata_classic (WaypointPath construit ici : pas de chemin en base)
+            static WaypointPath path(0, {
+                WaypointNode(0, -2884.155f, -71.08681f, 242.0678f),
+                WaypointNode(1, -2720.592f, -111.0035f, 242.5955f),
+                WaypointNode(2, -2683.951f, -382.9010f, 231.1792f),
+                WaypointNode(3, -2619.148f, -484.9288f, 231.1792f),
+                WaypointNode(4, -2543.868f, -525.3333f, 231.1792f),
+                WaypointNode(5, -2465.321f, -502.4896f, 190.7347f),
+                WaypointNode(6, -2343.872f, -401.8281f, -8.320873f) });
+            me->SetCanFly(true);
+            me->SetDisableGravity(true);
+            me->GetMotionMaster()->MovePath(path, false);
             me->CastSpell(me, SPELL_SPIRIT_FORM);
         }
 

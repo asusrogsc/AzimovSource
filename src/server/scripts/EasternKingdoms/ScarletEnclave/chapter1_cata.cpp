@@ -454,7 +454,8 @@ struct npc_hearthglen_crusader : public ScriptedAI
         if (!spellInfo)
             return;
 
-        auto [minRange, maxRange] = spellInfo->GetMinMaxRange(false);
+        float minRange = spellInfo->GetMinRange(false);
+        float maxRange = spellInfo->GetMaxRange(false);
         _minimumRange = minRange;
 
         if (!_minimumRange)

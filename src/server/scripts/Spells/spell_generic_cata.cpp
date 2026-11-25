@@ -103,7 +103,7 @@ class spell_gen_arena_drink : public AuraScript
     void CalcPeriodic(AuraEffect const* /*aurEff*/, bool& isPeriodic, int32& /*amplitude*/)
     {
         // Get SPELL_AURA_MOD_POWER_REGEN aura from spell
-        AuraEffect* regen = GetAura()->Effects[EFFECT_0];
+        AuraEffect* regen = GetAura()->GetEffect(EFFECT_0);
         if (!regen)
             return;
 
@@ -114,7 +114,7 @@ class spell_gen_arena_drink : public AuraScript
 
     void CalcAmount(AuraEffect const* /*aurEff*/, int32& amount, bool& /*canBeRecalculated*/)
     {
-        AuraEffect* regen = GetAura()->Effects[EFFECT_0];
+        AuraEffect* regen = GetAura()->GetEffect(EFFECT_0);
         if (!regen)
             return;
 
@@ -125,7 +125,7 @@ class spell_gen_arena_drink : public AuraScript
 
     void UpdatePeriodic(AuraEffect* aurEff)
     {
-        AuraEffect* regen = GetAura()->Effects[EFFECT_0];
+        AuraEffect* regen = GetAura()->GetEffect(EFFECT_0);
         if (!regen)
             return;
 
@@ -279,7 +279,7 @@ class spell_gen_chains_of_ice : public AuraScript
     void UpdatePeriodic(AuraEffect* aurEff)
     {
         // Get 0 effect aura
-        AuraEffect* slow = GetAura()->Effects[EFFECT_0];
+        AuraEffect* slow = GetAura()->GetEffect(EFFECT_0);
         if (!slow)
             return;
 
@@ -312,7 +312,7 @@ enum CloneWeaponSpells
 
 class spell_gen_consumption : public SpellScript
 {
-    void CalculateDamage(SpellEffectInfo const& /*spellEffectInfo*/, Unit const* /*victim*/, int32& damage, int32& /*flatMod*/, float& /*pctMod*/) const
+    void CalculateDamage(Unit* /*victim*/, int32& damage, int32& /*flatMod*/, float& /*pctMod*/)
     {
         if (SpellInfo const* createdBySpell = sSpellMgr->GetSpellInfo(GetCaster()->GetUInt32Value(UNIT_CREATED_BY_SPELL)))
             damage = createdBySpell->Effects[EFFECT_1].CalcValue();
@@ -364,7 +364,7 @@ class spell_gen_despawn_aura : public AuraScript
 
     void Register() override
     {
-        AfterEffectRemove.Register(&spell_gen_despawn_aura::OnRemove, EFFECT_FIRST_FOUND, SPELL_AURA_DUMMY, AURA_EFFECT_HANDLE_REAL);
+        AfterEffectRemove.Register(&spell_gen_despawn_aura::OnRemove, SpellEffIndex(EFFECT_FIRST_FOUND), SPELL_AURA_DUMMY, AURA_EFFECT_HANDLE_REAL);
     }
 };
 
