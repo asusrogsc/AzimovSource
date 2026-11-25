@@ -34,6 +34,9 @@ void AddSC_pet_spell_scripts();
 void AddSC_spell_generic_cata();   // Azimov : lot 12 (cata_classic)
 void AddSC_spell_item_cata();
 
+// Azimov : lot 13 (cata_classic)
+void AddSC_spell_quest_cata();
+
 // The name of this function should match:
 // void Add${NameOfDirectory}Scripts()
 void AddSpellsScripts()
@@ -55,4 +58,5 @@ void AddSpellsScripts()
     AddSC_pet_spell_scripts();
     AddSC_spell_generic_cata();
     AddSC_spell_item_cata();
+    AddSC_spell_quest_cata();
 }

@@ -253,6 +253,12 @@ void AddSC_western_plaguelands();
 void AddSC_westfall();
 void AddSC_wetlands();
 
+// Azimov : lot 13 (cata_classic)
+void AddSC_chapter1_cata();
+void AddSC_zone_westfall_cata();
+void AddSC_zone_redridge_mountains_cata();
+void AddSC_zone_blasted_lands_cata();
+
 // The name of this function should match:
 // void Add${NameOfDirectory}Scripts()
 void AddEasternKingdomsScripts()
@@ -492,4 +498,8 @@ void AddEasternKingdomsScripts()
     AddSC_western_plaguelands();
     AddSC_westfall();
     AddSC_wetlands();
+    AddSC_chapter1_cata();
+    AddSC_zone_westfall_cata();
+    AddSC_zone_redridge_mountains_cata();
+    AddSC_zone_blasted_lands_cata();
 }

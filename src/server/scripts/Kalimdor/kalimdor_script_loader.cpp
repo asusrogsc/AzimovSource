@@ -166,6 +166,11 @@ void AddSC_ungoro_crater();
 void AddSC_winterspring();
 void AddSC_uldum();
 
+// Azimov : lot 13 (cata_classic)
+void AddSC_zone_azuremyst_isle_cata();
+void AddSC_zone_bloodmyst_isle_cata();
+void AddSC_zone_mulgore_cata();
+
 // The name of this function should match:
 // void Add${NameOfDirectory}Scripts()
 void AddKalimdorScripts()
@@ -319,4 +324,7 @@ void AddKalimdorScripts()
     AddSC_ungoro_crater();
     AddSC_winterspring();
     AddSC_uldum();
+    AddSC_zone_azuremyst_isle_cata();
+    AddSC_zone_bloodmyst_isle_cata();
+    AddSC_zone_mulgore_cata();
 }

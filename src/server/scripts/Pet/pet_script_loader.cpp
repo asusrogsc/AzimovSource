@@ -24,6 +24,9 @@ void AddSC_priest_pet_scripts();
 void AddSC_shaman_pet_scripts();
 void AddSC_paladin_pet_script();
 
+// Azimov : lot 13 (cata_classic)
+void AddSC_pet_generic_cata();
+
 // The name of this function should match:
 // void Add${NameOfDirectory}Scripts()
 void AddPetScripts()
@@ -35,4 +38,5 @@ void AddPetScripts()
     AddSC_priest_pet_scripts();
     AddSC_shaman_pet_scripts();
     AddSC_paladin_pet_script();
+    AddSC_pet_generic_cata();
 }
