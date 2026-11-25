@@ -244,10 +244,19 @@ namespace
         if (!item)
             return;
 
+        // Les objets liés gardés en banque n'ont pas de propriétaire : sans ça, CanStoreItem les refuse
+        // (EQUIP_ERR_NOT_OWNER, « lié à un autre personnage ») et on affichait à tort « sacs pleins ».
+        item->SetOwnerGUID(player->GetGUID());
+
         ItemPosCountVec dest;
-        if (player->CanStoreItem(NULL_BAG, NULL_SLOT, dest, item, false) != EQUIP_ERR_OK)
+        InventoryResult msg = player->CanStoreItem(NULL_BAG, NULL_SLOT, dest, item, false);
+        if (msg != EQUIP_ERR_OK)
         {
-            Notify(player, "Vos sacs sont pleins.");
+            item->SetOwnerGUID(ObjectGuid::Empty);
+            if (msg == EQUIP_ERR_INV_FULL || msg == EQUIP_ERR_BAG_FULL)
+                Notify(player, "Vos sacs sont pleins.");
+            else
+                player->SendEquipError(msg, item, nullptr);   // vraie raison (objet unique déjà possédé, etc.)
             return;
         }
 
