@@ -39,7 +39,8 @@ enum LazyPeonYells
 
 enum LazyPeon
 {
-    QUEST_LAZY_PEONS    = 5441,
+    QUEST_LAZY_PEONS    = 5441,   // ancienne version (5 péons)
+    QUEST_LAZY_PEONS_CATA = 25134, // version Cataclysm de la Vallée des Épreuves (4 péons)
     GO_LUMBERPILE       = 175784,
     SPELL_BUFF_SLEEP    = 17743,
     SPELL_AWAKEN_PEON   = 19938
@@ -88,7 +89,8 @@ public:
                 return;
 
             Player* player = caster->ToPlayer();
-            if (player && player->GetQuestStatus(QUEST_LAZY_PEONS) == QUEST_STATUS_INCOMPLETE)
+            if (player && (player->GetQuestStatus(QUEST_LAZY_PEONS) == QUEST_STATUS_INCOMPLETE
+                || player->GetQuestStatus(QUEST_LAZY_PEONS_CATA) == QUEST_STATUS_INCOMPLETE))
             {
                 player->KilledMonsterCredit(me->GetEntry(), me->GetGUID());
                 Talk(SAY_SPELL_HIT, caster);
