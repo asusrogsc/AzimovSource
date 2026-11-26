@@ -2,11 +2,13 @@
  * Azimov - Chasseur de démons (classe 10), étape 2 : kit Dévastation.
  * Les sorts (1002000-1002012) sont dans Spell.dbc / SpellEffect.dbc ; ce script les apprend
  * automatiquement selon le niveau (connexion + passage de niveau), comme les techniques de classe.
+ * Règle : 2 effets maximum par sort custom (3 effets = plantage aléatoire du client au chargement).
  */
 
 #include "ScriptMgr.h"
 #include "Player.h"
 #include "SharedDefines.h"
+#include "SpellScript.h"
 
 namespace AzimovDemonHunter
 {
@@ -36,6 +38,37 @@ void LearnClassSpells(Player* player)
             player->LearnSpell(entry.spell, false);
 }
 
+// 1002005 - Danse des lames : +100 % d'esquive pendant 1 s (1002006)
+// (lancé par script : le client 4.3.4 plante avec des sorts custom à 3 effets)
+class spell_azimov_dh_blade_dance : public SpellScript
+{
+    void HandleAfterCast()
+    {
+        if (Unit* caster = GetCaster())
+            caster->CastSpell(caster, 1002006, true);
+    }
+
+    void Register() override
+    {
+        AfterCast.Register(&spell_azimov_dh_blade_dance::HandleAfterCast);
+    }
+};
+
+// 1002012 - Métamorphose : +20 % de hâte (1002013) pendant la même durée
+class spell_azimov_dh_metamorphosis : public SpellScript
+{
+    void HandleAfterCast()
+    {
+        if (Unit* caster = GetCaster())
+            caster->CastSpell(caster, 1002013, true);
+    }
+
+    void Register() override
+    {
+        AfterCast.Register(&spell_azimov_dh_metamorphosis::HandleAfterCast);
+    }
+};
+
 class player_azimov_demon_hunter : public PlayerScript
 {
 public:
@@ -55,5 +88,8 @@ public:
 
 void AddSC_azimov_demon_hunter()
 {
-    new AzimovDemonHunter::player_azimov_demon_hunter();
+    using namespace AzimovDemonHunter;
+    new player_azimov_demon_hunter();
+    RegisterSpellScript(spell_azimov_dh_blade_dance);
+    RegisterSpellScript(spell_azimov_dh_metamorphosis);
 }
