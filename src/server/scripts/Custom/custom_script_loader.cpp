@@ -37,6 +37,7 @@ void AddSC_azimov_void_elf();
 void AddSC_custom_echo_elements();
 void AddSC_custom_garde_lumiere();
 void AddSC_azimov_maghar();
+void AddSC_azimov_demon_hunter();
 void AddSC_azimov_account_mounts();
 void AddSC_azimov_account_toys();
 void AddSC_azimov_account_heirlooms();
@@ -76,6 +77,7 @@ void AddCustomScripts()
 	AddSC_custom_echo_elements();
 	AddSC_custom_garde_lumiere();
 	AddSC_azimov_maghar();
+	AddSC_azimov_demon_hunter();
 	AddSC_azimov_account_mounts();
 	AddSC_azimov_account_toys();
 	AddSC_azimov_account_heirlooms();
