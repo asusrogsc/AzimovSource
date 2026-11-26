@@ -625,7 +625,7 @@ float const m_diminishing_k[MAX_CLASSES] =
     0.9880f,  // Shaman
     0.9830f,  // Mage
     0.9830f,  // Warlock
-    0.0f,     // ??
+    0.9880f,  // Chasseur de démons (Azimov, comme le voleur)
     0.9720f   // Druid
 };
 
@@ -662,7 +662,7 @@ float const parry_cap[MAX_CLASSES] =
     145.560408f,    // Shaman
     0.0f,           // Mage
     0.0f,           // Warlock
-    0.0f,           // ??
+    145.560408f,    // Chasseur de démons (Azimov, comme le voleur)
     0.0f            // Druid
 };
 
@@ -700,7 +700,7 @@ float const dodge_cap[MAX_CLASSES] =
     145.560408f,    // Shaman
     150.375940f,    // Mage
     150.375940f,    // Warlock
-    0.0f,           // ??
+    145.560408f,    // Chasseur de démons (Azimov, comme le voleur)
     116.890707f     // Druid
 };
 

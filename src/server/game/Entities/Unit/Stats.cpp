@@ -156,6 +156,7 @@ StatType Stats::GetPrimaryStat() const
         }
         case CLASS_HUNTER:
         case CLASS_ROGUE:
+        case CLASS_DEMON_HUNTER:
             return StatType::Agility;
         case CLASS_MAGE:
         case CLASS_WARLOCK:

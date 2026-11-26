@@ -4914,7 +4914,7 @@ void Player::GetDodgeFromAgility(float &diminishing, float &nondiminishing) cons
          0.016750f, // Shaman
          0.034575f, // Mage
          0.020350f, // Warlock
-         0.0f,      // ??
+        -0.005900f, // Chasseur de démons (Azimov, comme le voleur)
          0.049510f  // Druid
     };
 
@@ -4930,7 +4930,7 @@ void Player::GetDodgeFromAgility(float &diminishing, float &nondiminishing) cons
          1.07f,     // Shaman
          0.66f,     // Mage
          0.65f,     // Warlock
-         0.f,       // ??
+         1.33f,     // Chasseur de démons (Azimov, comme le voleur)
          1.32f      // Druid
     };
 
@@ -10940,6 +10940,7 @@ bool Player::CanRollNeedForItem(ItemTemplate const* itemTemplate) const
                 break;
             case CLASS_DRUID:
             case CLASS_ROGUE:
+            case CLASS_DEMON_HUNTER:
                 if (itemTemplate->GetSubClass() != ITEM_SUBCLASS_ARMOR_LEATHER)
                     return false;
                 break;
@@ -27330,7 +27331,7 @@ float Player::GetAverageItemLevel() const
     uint32 offHandItemLevel = 0;
     uint32 mainHandItemLevel = 0;
 
-    if (getClass() == CLASS_WARRIOR || getClass() == CLASS_ROGUE || getClass() == CLASS_SHAMAN || getClass() == CLASS_HUNTER || getClass() == CLASS_DEATH_KNIGHT)
+    if (getClass() == CLASS_WARRIOR || getClass() == CLASS_ROGUE || getClass() == CLASS_SHAMAN || getClass() == CLASS_HUNTER || getClass() == CLASS_DEATH_KNIGHT || getClass() == CLASS_DEMON_HUNTER)
     {
         uint8 const weaponSorterSize = 6;
         std::array<uint32, weaponSorterSize> weaponSorter;

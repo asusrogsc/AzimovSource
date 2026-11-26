@@ -97,6 +97,7 @@ inline float GetGameTableColumnForClass(T const* row, int32 class_)
         case CLASS_HUNTER:
             return row->Hunter;
         case CLASS_ROGUE:
+        case CLASS_DEMON_HUNTER: // Azimov
             return row->Rogue;
         case CLASS_PRIEST:
             return row->Priest;
