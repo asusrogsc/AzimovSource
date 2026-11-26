@@ -172,6 +172,12 @@ void WaypointMovementGenerator<Creature>::StartMove(Creature* creature, bool rel
     }
 
     // Step two: node selection is done, build spline data
+    // Azimov : le chemin a pu être remplacé (SmartAI StartPath recharge le même WaypointPath) -> nœud hors limites
+    if (!_path || _path->Nodes.empty())
+        return;
+    if (_currentNode >= _path->Nodes.size())
+        _currentNode = 0;
+
     creature->AddUnitState(UNIT_STATE_ROAMING_MOVE);
     WaypointNode const& waypoint = _path->Nodes.at(_currentNode);
     bool const useTransportPath = !creature->GetTransGUID().IsEmpty();
@@ -276,6 +282,10 @@ bool WaypointMovementGenerator<Creature>::DoUpdate(Creature* creature, uint32 di
         _lastSplineId = 0;
     }
 
+    // Azimov : chemin remplacé pendant un crochet (SmartAI) -> nœud hors limites, on repart du début
+    if (_currentNode >= _path->Nodes.size())
+        _currentNode = 0;
+
     WaypointNode const& waypoint = _path->Nodes.at(_currentNode);
 
     // Set home position to current position.
@@ -330,7 +340,9 @@ bool WaypointMovementGenerator<Creature>::GetResetPosition(Unit* /*owner*/, floa
     if (!_path || _path->Nodes.empty())
         return false;
 
-    ASSERT(_currentNode < _path->Nodes.size(), "WaypointMovementGenerator::GetResetPos: tried to reference a node id (%u) which is not included in path (%u)", _currentNode, _path->Id);
+    // Azimov : plus d'ASSERT (plantage du serveur) si le chemin a été remplacé
+    if (_currentNode >= _path->Nodes.size())
+        return false;
     WaypointNode const& waypoint = _path->Nodes.at(_currentNode);
 
     x = waypoint.X;
