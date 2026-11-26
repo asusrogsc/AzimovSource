@@ -19,6 +19,7 @@
 void AddSC_kezan();
 void AddSC_lost_isles();
 void AddSC_lost_isles_2();   // Azimov : Îles Perdues partie 2 (lot 23)
+void AddSC_lost_isles_3();   // Azimov : Îles Perdues partie 3 (lot 25)
 void AddSC_deepholm();
 void AddSC_instance_stonecore(); // Stonecore
 void AddSC_stonecore();
@@ -34,6 +35,7 @@ void AddMaelstromScripts()
     AddSC_kezan();
     AddSC_lost_isles();
     AddSC_lost_isles_2();
+    AddSC_lost_isles_3();
     AddSC_deepholm();
     AddSC_instance_stonecore(); // Stonecore
     AddSC_stonecore();
